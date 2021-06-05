@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@openzeppelin/contracts": "3.4",
+    "@openzeppelin/contracts": "^4.1.0",
     "@uniswap/v2-periphery": "*",
     "truffle-hdwallet-provider-privkey": "^0.3.0",
     "truffle-plugin-verify": "^0.5.8"
