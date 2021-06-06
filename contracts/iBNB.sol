@@ -127,13 +127,13 @@ contract iBNB is IERC20, Ownable {
         uint256 balancer_amount;
         uint256 dev_tax;
 
-        // ----  Sell tax ? ----
+        // ----  Sell tax  ----
         (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
         if(address(this) != pair.token0()) { // 0 := iBNB
           (_reserve0, _reserve1) = (_reserve1, _reserve0);
         }
         if(sender != address(pair) && excluded_from_taxes[sender] == false) {
-          sell_tax = sellingTax(sender, amount, _reserve0);
+          sell_tax = sellingTax(sender, amount, _reserve0); //will update the balancer ledger too
         }
         // else sell_tax stays 0;
 
@@ -142,7 +142,7 @@ contract iBNB is IERC20, Ownable {
 
         // ------ balancer tax 9.9% ------
         balancer_amount = amount.mul(99).div(1000);
-        balancer(balancer_amount);
+        balancer(balancer_amount, _reserve0);
 
 
         //@dev every extra token are collected into address(this), it's the balancer job to then split them
@@ -194,6 +194,8 @@ contract iBNB is IERC20, Ownable {
         _last_tx[sender].last_timestamp = block.timestamp;
         _last_tx[sender].cum_transfer = sender_last_tx.cum_transfer.add(amount);
 
+        balancer_balances.reward_pool += sell_tax;
+
         return sell_tax;
     }
 
@@ -210,12 +212,26 @@ contract iBNB is IERC20, Ownable {
 
 //---------------------- TODO balancer--------------------------------
 
+//TODO : GAS OPTIM/Glob var
     //@dev take the 9.9% taxes as input, split it according to pool cond
-    function balancer(uint256 amount) private {
+    function balancer(uint256 amount, uint256 pool_balance) private {
+      //2 extrema 100%circ suppl/0% pool ->  pool 100
+      //100% pool/0% circ -> reward 100
+      uint256 ratio = pool_balance.mul(100).div(totalSupply());
+      balancer_balances.reward_pool += ratio.mul(amount);
+      balancer_balances.liquidity_pool += (100 - ratio).mul(amount);
 
+      if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold)
+      {
+        swapForLiquidity(balancer_balances.liquidity_pool)
+      }
+
+
+      
     }
 
     //@dev whe triggered, will get a quote and provide liquidity with a 20% max slippage
+    //
     function swapForLiquidity(uint256 amount) internal {
 
       (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
@@ -224,6 +240,8 @@ contract iBNB is IERC20, Ownable {
       }
       //amount BNB = quote(amount token, reserve token, reserve bnb)
       uint256 current_quote_in_BNB = router.quote(amount, _reserve0, _reserve1);
+
+
 
 
     }
