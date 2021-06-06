@@ -23,13 +23,23 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 contract iBNB is IERC20, Ownable {
 
+    struct past_tx {
+      uint256 last_timestamp;
+      uint256 cum_transfer; //this is not what you think, you perv
+    }
+
     mapping (address => uint256) private _balances;
-    mapping (address => uint256) private _last_tx;
+    mapping (address => past_tx) private _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
     mapping (address => bool) public excluded_from_taxes;
 
     uint256 private _decimals = 9;
     uint256 private _totalSupply = 10**15 * 10**_decimals;
+    uint256 genesis_timestamp;
+
+    //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
+    //therefore value are div by 10**7
+    uint16[5] public selling_taxes_thresholds = [125, 250, 500, 750, 1000];
 
 
 
@@ -39,6 +49,8 @@ contract iBNB is IERC20, Ownable {
     IUniswapV2Pair pair;
     IUniswapV2Router02 router;
 
+    event TaxRatesChanged();
+
     constructor (address _router) {
          _balances[msg.sender] = _totalSupply;
          //create pair to get the pair address
@@ -46,8 +58,7 @@ contract iBNB is IERC20, Ownable {
          IUniswapV2Factory factory = IUniswapV2Factory(router.factory());
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
-// TODO : retrieve token0 and 1 -> what is what (ordered by addresses in factory)
-//ie which one is address(this) and save this for uni oracle
+         genesis_timestamp = block.timestamp;
     }
 
     function decimals() public view returns (uint256) {
@@ -97,19 +108,28 @@ contract iBNB is IERC20, Ownable {
         return true;
     }
 
+
+//TODO: circuit breaker
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
         require(sender != address(0), "ERC20: transfer from the zero address");
 
-        (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // reserve0, reserve1, timestamp last tx
-        if(address(this) != pair.token0()) {
-          (_reserve0, _reserve1) = (_reserve1, _reserve0); // swap solidity-style
+
+
+        (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
+        if(address(this) != pair.token0()) { // 0 := iBNB
+          (_reserve0, _reserve1) = (_reserve1, _reserve0);
         }
-        
         //amount BNB = quote(amount token, reserve token, reserve bnb)
         uint256 current_quote_in_BNB = router.quote(amount, _reserve0, _reserve1);
 
+        uint256 sell_tax;
+        if(sender != address(pair) && excluded_from_taxes[sender] == false) {
+          sell_tax = sellingTax(sender, amount, current_quote_in_BNB);
+        }
+        else {
+          sell_tax = 0;
+        }
 
-        require(antiDump(sender, amount, current_quote_in_BNB), "iBNB: Max sell reached"); //dumping_check -> to(pair) & > 0.1 in 24h
 
 
         uint256 senderBalance = _balances[sender];
@@ -120,12 +140,37 @@ contract iBNB is IERC20, Ownable {
         emit Transfer(sender, recipient, amount);
     }
 
-    //@dev prevent transaction >0.1bnb if not
-    function antiDump(address sender, uint256 amount, uint256 current_quote_in_BNB) private returns(bool proceed) {
-      if(sender != address(pair) && excluded_from_taxes[sender] == false) {
-        // volume on 24h check
-      }
+    //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
+    //the thresholds defined in selling_taxes_thresholds on a daily basis (calendar)
+    function sellingTax(address sender, uint256 amount, uint256 current_quote_in_BNB) private returns(uint256) {
 
+        uint256 _genesis_timestamp = genesis_timestamp; //gas optim
+        uint16[5] _tax_thresh = selling_taxes_thresholds; //gas optim
+        past_tx sender_last_tx = _last_tx[sender];
+
+        //num days since genesis > num of days since last tx ? reinit cumsum : keep cumsum
+        if((block.timestamp - genesis_timestamp) / 8400 > (block.timestamp - _last_tx[sender].last_timestamp) / 8400) {
+          sender_last_tx[sender].cum_transfer = 0;
+        }
+
+        if(_last_tx[sender].cum_transfer > _tax_thresh[4]) {revert("Selling tax: above max amount");}
+        else if
+        else if
+        ...
+        else revert
+
+        sender_last_tx.last_timestamp = block.timestamp;
+        uint256 a = _last_tx[sender].cum_transfer;
+        sender_last_tx.cum_transfer = a.sum(amount);
+
+
+        return sell_tax;
+    }
+
+
+    function setSellingTaxesThreshold(uint256[6] memory new_taxes) public onlyOwner {
+      selling_taxes_rates = new_taxes;
+      emit TaxRatesChanged();
     }
 
 
