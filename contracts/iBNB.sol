@@ -118,38 +118,44 @@ contract iBNB is IERC20, Ownable {
     }
 
 
-//TODO: circuit breaker
+//TODO: circuit breaker !!!!!
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
         require(sender != address(0), "ERC20: transfer from the zero address");
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "ERC20: transfer amount exceeds balance");
         uint256 sell_tax = 0;
+        uint256 balancer_amount;
+        uint256 dev_tax;
 
+        // ----  Sell tax ? ----
         (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
         if(address(this) != pair.token0()) { // 0 := iBNB
           (_reserve0, _reserve1) = (_reserve1, _reserve0);
         }
-
         if(sender != address(pair) && excluded_from_taxes[sender] == false) {
           sell_tax = sellingTax(sender, amount, _reserve0);
         }
         // else sell_tax stays 0;
 
+        // ------ dev tax 0.1% -------
+        dev_tax = amount.mul(1).div(1000);
 
-        //9.9 and 1%
-
-        //balancer call
-
+        // ------ balancer tax 9.9% ------
+        balancer_amount = amount.mul(99).div(1000);
+        balancer(balancer_amount);
 
 
         //@dev every extra token are collected into address(this), it's the balancer job to then split them
-        //between pool and reward
+        //between pool and reward, using his the dedicated struct
         _balances[sender] = senderBalance - amount;
-        _balances[recipient] += amount - sell_tax ;
-        _balances[address(this)] += sell_tax;
+        _balances[recipient] += amount - sell_tax - dev_tax - balancer_amount;
+        _balances[address(this)] += sell_tax + balancer_amount;
+        _balances[devWallet] += dev_tax;
 
         emit Transfer(sender, recipient, amount);
         emit Transfer(sender, address(this), sell_tax);
+        emit Transfer(sender, address(this), balancer_amount);
+        emit Transfer(sender, devWallet, dev_tax);
     }
 
 //TODO Gas optim
