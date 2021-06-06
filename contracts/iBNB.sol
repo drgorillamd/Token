@@ -115,19 +115,23 @@ contract iBNB is IERC20, Ownable {
         require(sender != address(0), "ERC20: transfer from the zero address");
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "ERC20: transfer amount exceeds balance");
-
+        uint256 sell_tax = 0;
 
         (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
         if(address(this) != pair.token0()) { // 0 := iBNB
           (_reserve0, _reserve1) = (_reserve1, _reserve0);
         }
-        uint256 sell_tax;
+
         if(sender != address(pair) && excluded_from_taxes[sender] == false) {
           sell_tax = sellingTax(sender, amount, _reserve0);
         }
-        else {
-          sell_tax = 0;
-        }
+        // else sell_tax stays 0;
+
+
+        //9.9 and 1%
+
+        //balancer call
+
 
 
         //@dev every extra token are collected into address(this), it's the balancer job to then split them
@@ -140,10 +144,11 @@ contract iBNB is IERC20, Ownable {
         emit Transfer(sender, address(this), sell_tax);
     }
 
-    //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
-    //the thresholds defined in selling_taxes_thresholds on a daily basis (calendar)
-    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
 //TODO Gas optim
+    //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
+    //the thresholds defined in selling_taxes_thresholds on a daily (calendar) basis
+  function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
+
         uint16[5] memory _tax_tranches = selling_taxes_tranches; //gas optim
         past_tx memory sender_last_tx = _last_tx[sender];
         uint256 sell_tax = 0;
@@ -190,6 +195,11 @@ contract iBNB is IERC20, Ownable {
     }
 
 //---------------------- TODO --------------------------------
+
+    function balancer() private {
+
+    }
+
     //@dev whe triggered, will get a quote and provide liquidity with a 20% max slippage
     function swapForLiquidity(uint256 amount) internal {
 
