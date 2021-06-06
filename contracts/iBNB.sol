@@ -29,6 +29,11 @@ contract iBNB is IERC20, Ownable {
       uint256 cum_transfer; //this is not what you think, you perv
     }
 
+    struct prop_balances {
+      uint128 reward_pool;
+      uint128 liquidity_pool;
+    }
+
     mapping (address => uint256) private _balances;
     mapping (address => past_tx) private _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
@@ -50,6 +55,8 @@ contract iBNB is IERC20, Ownable {
     IUniswapV2Pair pair;
     IUniswapV2Router02 router;
 
+    prop_balances balancer_balances;
+
     event TaxRatesChanged();
 
     constructor (address _router) {
@@ -60,6 +67,7 @@ contract iBNB is IERC20, Ownable {
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
          genesis_timestamp = block.timestamp;
+
     }
 
     function decimals() public view returns (uint256) {
@@ -194,9 +202,10 @@ contract iBNB is IERC20, Ownable {
       emit TaxRatesChanged();
     }
 
-//---------------------- TODO --------------------------------
+//---------------------- TODO balancer--------------------------------
 
-    function balancer() private {
+    //@dev take the 9.9% taxes as input, split it according to pool cond
+    function balancer(uint256 amount) private {
 
     }
 
@@ -212,6 +221,8 @@ contract iBNB is IERC20, Ownable {
 
 
     }
+
+//-----------------------------TODO BNB reward computing&claim + tax
 
     function _approve(address owner, address spender, uint256 amount) internal virtual {
         require(owner != address(0), "ERC20: approve from the zero address");
