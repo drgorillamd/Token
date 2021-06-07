@@ -65,6 +65,7 @@ contract iBNB is IERC20, Ownable {
 
     event TaxRatesChanged();
     event swapForLiquidity(string);
+    event BalancerRatio(uint256);
 
     constructor (address _router) {
          _balances[msg.sender] = _totalSupply;
@@ -184,8 +185,8 @@ contract iBNB is IERC20, Ownable {
         past_tx memory sender_last_tx = _last_tx[sender];
         uint256 sell_tax = 0;
 
-        //num days since genesis > num of days since last tx ?
-        if((block.timestamp - genesis_timestamp) / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
+        //last tx is not today ?
+        if(block.timestamp / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
           _last_tx[sender].cum_transfer = 0;
           _last_tx[sender].BNB_basis_for_reward = amount;
         }
@@ -217,8 +218,6 @@ contract iBNB is IERC20, Ownable {
         return sell_tax;
     }
 
-//---------------------- TODO balancer--------------------------------
-
 //TODO : GAS OPTIM/Glob var
     //@dev take the 9.9% taxes as input, split it according to pool condition
     function balancer(uint256 amount, uint256 pool_balance) private {
@@ -240,7 +239,7 @@ contract iBNB is IERC20, Ownable {
             balancer_balances.reward_pool -= token_out;
         }
 
-
+        emit BalancerRatio(ratio);
     }
 
     //@dev when triggered, will swap and provide liquidity
@@ -293,6 +292,16 @@ contract iBNB is IERC20, Ownable {
 
     //-----------------------------TODO BNB reward computing&claim + tax
 
+    function computeReward(address sender) public {
+      uint256 BNB_basis_for_reward;
+      uint256 last_timestamp
+    }
+
+    function claimReward() public {
+
+    }
+
+    function
 
     function resetBalancer() public onlyOwner {
       uint256 _contract_balance = balanceOf(address(this));
@@ -308,12 +317,10 @@ contract iBNB is IERC20, Ownable {
     function setSwapThreshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
     }
-
     function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
       selling_taxes_tranches = new_tranches;
       emit TaxRatesChanged();
     }
-
     function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
       selling_taxes_rates = new_amounts;
       emit TaxRatesChanged();
