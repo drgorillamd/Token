@@ -25,8 +25,9 @@ contract iBNB is IERC20, Ownable {
     using SafeMath for uint256;
 
     struct past_tx {
-      uint256 last_timestamp; //no choice, uint256
       uint256 cum_transfer; //this is not what you think, you perv
+      uint256 BNB_basis_for_reward;
+      uint256 last_timestamp; //no choice, uint256
     }
 
     struct prop_balances {
@@ -43,6 +44,7 @@ contract iBNB is IERC20, Ownable {
     uint256 private _totalSupply = 10**15 * 10**_decimals;
     uint256 genesis_timestamp;
     uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
+    uint256 public swap_for_reward_threshold = 10**14 * 10**_decimals;
 
 //TODO gas optim:
     //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
@@ -122,13 +124,22 @@ contract iBNB is IERC20, Ownable {
 
         return true;
     }
+    function _approve(address owner, address spender, uint256 amount) internal virtual {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
 
 
 //TODO: circuit breaker !!!!!
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
         require(sender != address(0), "ERC20: transfer from the zero address");
+
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "ERC20: transfer amount exceeds balance");
+
         uint256 sell_tax = 0;
         uint256 balancer_amount;
         uint256 dev_tax;
@@ -167,7 +178,7 @@ contract iBNB is IERC20, Ownable {
 //TODO Gas optim
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
     //the thresholds defined in selling_taxes_thresholds on a daily (calendar) basis
-  function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
+    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
 
         uint16[5] memory _tax_tranches = selling_taxes_tranches; //gas optim
         past_tx memory sender_last_tx = _last_tx[sender];
@@ -176,6 +187,7 @@ contract iBNB is IERC20, Ownable {
         //num days since genesis > num of days since last tx ?
         if((block.timestamp - genesis_timestamp) / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
           _last_tx[sender].cum_transfer = 0;
+          _last_tx[sender].BNB_basis_for_reward = amount;
         }
 
         uint256 new_cum_sum = amount.add(_last_tx[sender].cum_transfer);
@@ -205,17 +217,6 @@ contract iBNB is IERC20, Ownable {
         return sell_tax;
     }
 
-
-    function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
-      selling_taxes_tranches = new_tranches;
-      emit TaxRatesChanged();
-    }
-
-    function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
-      selling_taxes_rates = new_amounts;
-      emit TaxRatesChanged();
-    }
-
 //---------------------- TODO balancer--------------------------------
 
 //TODO : GAS OPTIM/Glob var
@@ -234,10 +235,11 @@ contract iBNB is IERC20, Ownable {
           balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
       }
 
+      if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
+          uint256 token_out = addBNB(balancer_balances.reward_pool);
+          balancer_balances.reward_pool -= token_out;
+      }
 
-
-//todo with reward pool too
-//todo resync function for reinit balancer
 
     }
 
@@ -255,7 +257,7 @@ contract iBNB is IERC20, Ownable {
         _approve(address(this), address(router), ~uint256(0));
       }
 
-      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, LP_contract, block.timestamp) {
+      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
         uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
         router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_contract, block.timestamp); //will not be catched
       }
@@ -268,15 +270,35 @@ contract iBNB is IERC20, Ownable {
       return token_amount;
     }
 
+    function addBNB(uint256 token_amount) internal returns (uint256) {
+      address[] memory route = new address[](2);
+      route[0] = address(this);
+      route[1] = router.WETH();
+
+      if(allowance(address(this), address(router)) < token_amount) {
+        _approve(address(this), address(router), ~uint256(0));
+      }
+
+      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount, 0, route, address(this), block.timestamp) {
+        emit swapForLiquidity("Liquidity added");
+        return token_amount;
+      }
+      catch {
+        emit swapForLiquidity("swapToken failure");
+        return 0;
+      }
+
+
+    }
+
+    function resetBalancer() public onlyOwner {
+      uint256 _contract_balance = balanceOf(address(this));
+      balancer_balances.reward_pool = _contract_balance.div(2);
+      balancer_balances.liquidity_pool = _contract_balance.div(2);
+    }
+
 //-----------------------------TODO BNB reward computing&claim + tax
 
-    function _approve(address owner, address spender, uint256 amount) internal virtual {
-        require(owner != address(0), "ERC20: approve from the zero address");
-        require(spender != address(0), "ERC20: approve to the zero address");
-
-        _allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
-    }
 
     function setLPContract(address _LP_contract) public onlyOwner {
       LP_contract = _LP_contract;
@@ -286,5 +308,15 @@ contract iBNB is IERC20, Ownable {
     }
     function setSwapThreshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
+    }
+
+    function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
+      selling_taxes_tranches = new_tranches;
+      emit TaxRatesChanged();
+    }
+
+    function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
+      selling_taxes_rates = new_amounts;
+      emit TaxRatesChanged();
     }
 }
