@@ -28,6 +28,7 @@ contract iBNB is IERC20, Ownable {
       uint256 cum_transfer; //this is not what you think, you perv
       uint256 BNB_basis_for_reward;
       uint256 last_timestamp; //no choice, uint256
+      uint256 last_claim;
     }
 
     struct prop_balances {
@@ -304,28 +305,33 @@ contract iBNB is IERC20, Ownable {
     function computeReward(address sender) public returns(uint256) {
 
       past_tx memory sender_last_tx = _last_tx[sender];
-      uint256 last_timestamp = _last_tx[sender].last_timestamp;
-      uint256 cum_transfer = _last_tx[sender].cum_transfer;
-      uint256 BNB_basis_for_reward; = _last_tx[sender].BNB_basis_for_reward;
-
-
-      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD])
-      uint256 reward
+      uint256 last_timestamp = sender_last_tx.last_timestamp;
+      uint256 cum_transfer = sender_last_tx.cum_transfer;
+      uint256 BNB_basis_for_reward; = sender_last_tx.BNB_basis_for_reward;
       address DEAD = address(0x000000000000000000000000000000000000dEaD);
 
-
+      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD]);
+PSEUDO :       uint256 reward theo = supply_owned * bnb_pool_balance
+              reward = reward_theo - taxes
 
       return reward;
     }
 
-    function claimReward() public returns (bool claimable){
-      if(block.timestamp / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
+    //@dev for frontend integration
+    function claimable() public returns (bool) {
+      return block.timestamp / 8400 > (block.timestamp - _sender_last_tx.last_timestamp) / 8400;
+    }
+
+    function claimReward() public{
+
+      //check
+PSEUDO :if(_sender_last_tx.last_timestamp.last_claim != today
+        && block.timestamp / 8400 > (block.timestamp - _sender_last_tx.last_timestamp) / 8400) {
+            PSEUDO : computeReward
+            store last claim //effect
+            withdraw  //interaction
 
       }
-      else {
-        return false;
-      }
-
     }
 
 
