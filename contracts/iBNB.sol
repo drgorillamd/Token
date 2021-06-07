@@ -41,7 +41,7 @@ contract iBNB is IERC20, Ownable {
     mapping (address => bool) public excluded_from_taxes;
 
     uint256 private _decimals = 9;
-    uint256 private _totalSupply = 696969696969420 * 10**_decimals;
+    uint256 private _totalSupply = 10**15 * 10**_decimals;
     uint256 genesis_timestamp;
     uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
     uint256 public swap_for_reward_threshold = 10**14 * 10**_decimals;
@@ -62,6 +62,12 @@ contract iBNB is IERC20, Ownable {
     IUniswapV2Router02 router;
 
     prop_balances balancer_balances;
+
+    modifier inSwap {
+      bool in_swap = true;
+      _;
+      in_swap = false;
+    }
 
     event TaxRatesChanged();
     event swapForLiquidity(string);
@@ -138,7 +144,7 @@ contract iBNB is IERC20, Ownable {
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
         require(sender != address(0), "ERC20: transfer from the zero address");
 
-        uint256 senderBalance = _balances[sender];
+        uint256 senderBalance = _balances[sender]; // gas SLOAD: 200 vs MLOAD: 3 ...
         require(senderBalance >= amount, "ERC20: transfer amount exceeds balance");
 
         uint256 sell_tax = 0;
@@ -185,9 +191,9 @@ contract iBNB is IERC20, Ownable {
         past_tx memory sender_last_tx = _last_tx[sender];
         uint256 sell_tax = 0;
 
-        //last tx is not today ?
+        //last tx is before today ?
         if(block.timestamp / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
-          _last_tx[sender].cum_transfer = 0;
+          _last_tx[sender].cum_transfer = 0; // a.k.a The Virgin
           _last_tx[sender].BNB_basis_for_reward = amount;
         }
 
@@ -228,13 +234,12 @@ contract iBNB is IERC20, Ownable {
         balancer_balances.reward_pool += amount.mul(ratio).div(100);
         balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
 
-
-        if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+        if(!in_swap && balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
             balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
         }
 
-        if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
+        if(!in_swap && balancer_balances.reward_pool >= swap_for_reward_threshold) {
             uint256 token_out = addBNB(balancer_balances.reward_pool);
             balancer_balances.reward_pool -= token_out;
         }
@@ -245,7 +250,7 @@ contract iBNB is IERC20, Ownable {
     //@dev when triggered, will swap and provide liquidity
     //    BNBfromSwap being the difference between and after the swap, slippage
     //    will result in extra-BNB for the reward pool (free money for the guys:)
-    function addLiquidity(uint256 token_amount) internal returns (uint256) {
+    function addLiquidity(uint256 token_amount) internal inSwap returns (uint256) {
       uint256 BNBfromReward = address(this).balance;
 
       address[] memory route = new address[](2);
@@ -269,7 +274,7 @@ contract iBNB is IERC20, Ownable {
       return token_amount;
     }
 
-    function addBNB(uint256 token_amount) internal returns (uint256) {
+    function addBNB(uint256 token_amount) internal inSwap returns (uint256) {
       address[] memory route = new address[](2);
       route[0] = address(this);
       route[1] = router.WETH();
@@ -292,16 +297,37 @@ contract iBNB is IERC20, Ownable {
 
     //-----------------------------TODO BNB reward computing&claim + tax
 
-    function computeReward(address sender) public {
-      uint256 BNB_basis_for_reward;
-      uint256 last_timestamp
+
+    //@dev reward prop to proportion of total supply owned, claimed daily
+    //to insure dynamic balancing.
+    //if an extra-buy occurs in the last 24h (cum_sum > BNB_basis), higher tax rate
+    function computeReward(address sender) public returns(uint256) {
+
+      past_tx memory sender_last_tx = _last_tx[sender];
+      uint256 last_timestamp = _last_tx[sender].last_timestamp;
+      uint256 cum_transfer = _last_tx[sender].cum_transfer;
+      uint256 BNB_basis_for_reward; = _last_tx[sender].BNB_basis_for_reward;
+
+
+      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD])
+      uint256 reward
+      address DEAD = address(0x000000000000000000000000000000000000dEaD);
+
+
+
+      return reward;
     }
 
-    function claimReward() public {
+    function claimReward() public returns (bool claimable){
+      if(block.timestamp / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
+
+      }
+      else {
+        return false;
+      }
 
     }
 
-    function
 
     function resetBalancer() public onlyOwner {
       uint256 _contract_balance = balanceOf(address(this));
