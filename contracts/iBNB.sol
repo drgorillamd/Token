@@ -41,7 +41,7 @@ contract iBNB is IERC20, Ownable {
     mapping (address => bool) public excluded_from_taxes;
 
     uint256 private _decimals = 9;
-    uint256 private _totalSupply = 10**15 * 10**_decimals;
+    uint256 private _totalSupply = 696969696969420 * 10**_decimals;
     uint256 genesis_timestamp;
     uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
     uint256 public swap_for_reward_threshold = 10**14 * 10**_decimals;
