@@ -223,28 +223,28 @@ contract iBNB is IERC20, Ownable {
     //@dev take the 9.9% taxes as input, split it according to pool condition
     function balancer(uint256 amount, uint256 pool_balance) private {
 
-      address DEAD = address(0x000000000000000000000000000000000000dEaD);
-      uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
+        address DEAD = address(0x000000000000000000000000000000000000dEaD);
+        uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
 
-      balancer_balances.reward_pool += amount.mul(ratio).div(100);
-      balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
+        balancer_balances.reward_pool += amount.mul(ratio).div(100);
+        balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
 
 
-      if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
-          uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
-          balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
-      }
+        if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+            uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
+            balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
+        }
 
-      if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
-          uint256 token_out = addBNB(balancer_balances.reward_pool);
-          balancer_balances.reward_pool -= token_out;
-      }
+        if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
+            uint256 token_out = addBNB(balancer_balances.reward_pool);
+            balancer_balances.reward_pool -= token_out;
+        }
 
 
     }
 
-    //@dev when triggered, will get a quote and provide liquidity with a 20% max slippage
-    //    BNBfromSwap being the difference between and after the swap, potential slippage
+    //@dev when triggered, will swap and provide liquidity
+    //    BNBfromSwap being the difference between and after the swap, slippage
     //    will result in extra-BNB for the reward pool (free money for the guys:)
     function addLiquidity(uint256 token_amount) internal returns (uint256) {
       uint256 BNBfromReward = address(this).balance;
@@ -291,15 +291,14 @@ contract iBNB is IERC20, Ownable {
 
     }
 
+    //-----------------------------TODO BNB reward computing&claim + tax
+
+
     function resetBalancer() public onlyOwner {
       uint256 _contract_balance = balanceOf(address(this));
       balancer_balances.reward_pool = _contract_balance.div(2);
       balancer_balances.liquidity_pool = _contract_balance.div(2);
     }
-
-//-----------------------------TODO BNB reward computing&claim + tax
-
-
     function setLPContract(address _LP_contract) public onlyOwner {
       LP_contract = _LP_contract;
     }
