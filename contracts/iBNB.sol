@@ -25,13 +25,13 @@ contract iBNB is IERC20, Ownable {
     using SafeMath for uint256;
 
     struct past_tx {
-      uint256 last_timestamp;
+      uint256 last_timestamp; //no choice, uint256
       uint256 cum_transfer; //this is not what you think, you perv
     }
 
     struct prop_balances {
-      uint128 reward_pool;
-      uint128 liquidity_pool;
+      uint256 reward_pool;
+      uint256 liquidity_pool;
     }
 
     mapping (address => uint256) private _balances;
@@ -42,15 +42,19 @@ contract iBNB is IERC20, Ownable {
     uint256 private _decimals = 9;
     uint256 private _totalSupply = 10**15 * 10**_decimals;
     uint256 genesis_timestamp;
+    uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
 
+//TODO gas optim:
     //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
     //therefore value are div by 10**7
     uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000];
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
 
-
     string private _name = "iBNB";
     string private _symbol = "iBNB";
+
+    address LP_contract;
+    address devWallet;
 
     IUniswapV2Pair pair;
     IUniswapV2Router02 router;
@@ -58,6 +62,7 @@ contract iBNB is IERC20, Ownable {
     prop_balances balancer_balances;
 
     event TaxRatesChanged();
+    event swapForLiquidity(string);
 
     constructor (address _router) {
          _balances[msg.sender] = _totalSupply;
@@ -67,7 +72,8 @@ contract iBNB is IERC20, Ownable {
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
          genesis_timestamp = block.timestamp;
-
+         LP_contract = msg.sender;  //temp set, then switch to the LP Lock
+         devWallet = msg.sender;
     }
 
     function decimals() public view returns (uint256) {
@@ -213,37 +219,53 @@ contract iBNB is IERC20, Ownable {
 //---------------------- TODO balancer--------------------------------
 
 //TODO : GAS OPTIM/Glob var
-    //@dev take the 9.9% taxes as input, split it according to pool cond
+    //@dev take the 9.9% taxes as input, split it according to pool condition
     function balancer(uint256 amount, uint256 pool_balance) private {
-      //2 extrema 100%circ suppl/0% pool ->  pool 100
-      //100% pool/0% circ -> reward 100
-      uint256 ratio = pool_balance.mul(100).div(totalSupply());
-      balancer_balances.reward_pool += ratio.mul(amount);
-      balancer_balances.liquidity_pool += (100 - ratio).mul(amount);
 
-      if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold)
-      {
-        swapForLiquidity(balancer_balances.liquidity_pool)
+      address DEAD = address(0x000000000000000000000000000000000000dEaD);
+      uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
+
+      balancer_balances.reward_pool += amount.mul(ratio).div(100);
+      balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
+
+
+      if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+          uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
+          balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
       }
 
 
-      
+
+//todo with reward pool too
+//todo resync function for reinit balancer
+
     }
 
-    //@dev whe triggered, will get a quote and provide liquidity with a 20% max slippage
-    //
-    function swapForLiquidity(uint256 amount) internal {
+    //@dev when triggered, will get a quote and provide liquidity with a 20% max slippage
+    //    BNBfromSwap being the difference between and after the swap, potential slippage
+    //    will result in extra-BNB for the reward pool (free money for the guys:)
+    function addLiquidity(uint256 token_amount) internal returns (uint256) {
+      uint256 BNBfromReward = address(this).balance;
 
-      (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
-      if(address(this) != pair.token0()) { // 0 := iBNB
-        (_reserve0, _reserve1) = (_reserve1, _reserve0);
+      address[] memory route = new address[](2);
+      route[0] = address(this);
+      route[1] = router.WETH();
+
+      if(allowance(address(this), address(router)) < token_amount) {
+        _approve(address(this), address(router), ~uint256(0));
       }
-      //amount BNB = quote(amount token, reserve token, reserve bnb)
-      uint256 current_quote_in_BNB = router.quote(amount, _reserve0, _reserve1);
 
+      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, LP_contract, block.timestamp) {
+        uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
+        router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_contract, block.timestamp); //will not be catched
+      }
+      catch {
+        emit swapForLiquidity("swapToken failure");
+        return 0;
+      }
 
-
-
+      emit swapForLiquidity("Liquidity added");
+      return token_amount;
     }
 
 //-----------------------------TODO BNB reward computing&claim + tax
@@ -256,4 +278,13 @@ contract iBNB is IERC20, Ownable {
         emit Approval(owner, spender, amount);
     }
 
+    function setLPContract(address _LP_contract) public onlyOwner {
+      LP_contract = _LP_contract;
+    }
+    function setDevWallet(address _devWallet) public onlyOwner {
+      devWallet = _devWallet;
+    }
+    function setSwapThreshold(uint256 threshold_in_token) public onlyOwner {
+      swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
+    }
 }
