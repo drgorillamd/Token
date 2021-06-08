@@ -26,7 +26,7 @@ contract iBNB is IERC20, Ownable {
 
     struct past_tx {
       uint256 cum_transfer; //this is not what you think, you perv
-      uint256 BNB_basis_for_reward;
+      uint256 token_basis_for_reward;
       uint256 last_timestamp; //no choice, uint256
       uint256 last_claim;
     }
@@ -169,13 +169,20 @@ contract iBNB is IERC20, Ownable {
         balancer_amount = amount.mul(99).div(1000);
         balancer(balancer_amount, _reserve0);
 
-
         //@dev every extra token are collected into address(this), it's the balancer job to then split them
         //between pool and reward, using his the dedicated struct
         _balances[sender] = senderBalance - amount;
-        _balances[recipient] += amount - sell_tax - dev_tax - balancer_amount;
-        _balances[address(this)] += sell_tax + balancer_amount;
+        _balances[recipient] += amount.sub(sell_tax).sub(dev_tax).sub(balancer_amount);
+        _balances[address(this)] += sell_tax.sum(balancer_amount);
         _balances[devWallet] += dev_tax;
+
+
+        // ------ update reward for recipient ---
+        if(now > _last_tx[recipient].last_new_reward_epoch + 1 days) {
+          _last_tx[recipient].last_new_reward_epoch = now;
+          _last_tx[recipient].token_basis_for_reward = _balances[recipient];
+        }
+
 
         emit Transfer(sender, recipient, amount);
         emit Transfer(sender, address(this), sell_tax);
@@ -186,16 +193,16 @@ contract iBNB is IERC20, Ownable {
 //TODO Gas optim
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
     //the thresholds defined in selling_taxes_thresholds on a daily (calendar) basis
-    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
+    function sellingTax(address sender, address recipient, uint256 amount, uint256 pool_balance) private returns(uint256) {
 
         uint16[5] memory _tax_tranches = selling_taxes_tranches; //gas optim
         past_tx memory sender_last_tx = _last_tx[sender];
         uint256 sell_tax = 0;
 
-        //last tx is before today ?
-        if(block.timestamp / 8400 > (block.timestamp - sender_last_tx.last_timestamp) / 8400) {
+//TODO : double check time
+        //>1 day since last tx
+        if(block.timestamp > sender_last_tx.last_timestamp + 1 days) {
           _last_tx[sender].cum_transfer = 0; // a.k.a The Virgin
-          _last_tx[sender].BNB_basis_for_reward = amount;
         }
 
         uint256 new_cum_sum = amount.add(_last_tx[sender].cum_transfer);
@@ -307,25 +314,27 @@ contract iBNB is IERC20, Ownable {
       past_tx memory sender_last_tx = _last_tx[sender];
       uint256 last_timestamp = sender_last_tx.last_timestamp;
       uint256 cum_transfer = sender_last_tx.cum_transfer;
-      uint256 BNB_basis_for_reward; = sender_last_tx.BNB_basis_for_reward;
+      uint256 token_basis_for_reward = sender_last_tx.token_basis_for_reward;
       address DEAD = address(0x000000000000000000000000000000000000dEaD);
 
-      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD]);
-PSEUDO :       uint256 reward theo = supply_owned * bnb_pool_balance
-              reward = reward_theo - taxes
+      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD]-_balances[address(pair)]);
+      uint256 reward theo = supply_owned * bnb_pool_balance
+
+
+              reward = reward_theo - taxes for too early
 
       return reward;
     }
 
     //@dev for frontend integration
     function claimable() public returns (bool) {
-      return block.timestamp / 8400 > (block.timestamp - _sender_last_tx.last_timestamp) / 8400;
+      return (block.timestamp / 8400 > _sender_last_tx.last_timestamp);
     }
 
     function claimReward() public{
 
       //check
-PSEUDO :if(_sender_last_tx.last_timestamp.last_claim != today
+      if(_sender_last_tx.last_claim != block.timestamp / 8400
         && block.timestamp / 8400 > (block.timestamp - _sender_last_tx.last_timestamp) / 8400) {
             PSEUDO : computeReward
             store last claim //effect
