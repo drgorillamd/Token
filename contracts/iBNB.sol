@@ -26,7 +26,6 @@ contract iBNB is IERC20, Ownable {
 
     struct past_tx {
       uint256 cum_transfer; //this is not what you think, you perv
-      uint256 token_basis_for_reward;
       uint256 last_timestamp; //no choice, uint256
       uint256 last_claim;
     }
@@ -39,7 +38,7 @@ contract iBNB is IERC20, Ownable {
     mapping (address => uint256) private _balances;
     mapping (address => past_tx) private _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
-    mapping (address => bool) public excluded_from_taxes;
+    mapping (address => bool) public excluded;
 
     uint256 private _decimals = 9;
     uint256 private _totalSupply = 10**15 * 10**_decimals;
@@ -50,8 +49,11 @@ contract iBNB is IERC20, Ownable {
 //TODO gas optim:
     //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
     //therefore value are div by 10**7
-    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000];
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
+    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000];
+    uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
+
+    bool in_swap;
 
     string private _name = "iBNB";
     string private _symbol = "iBNB";
@@ -65,14 +67,17 @@ contract iBNB is IERC20, Ownable {
     prop_balances balancer_balances;
 
     modifier inSwap {
-      bool in_swap = true;
+      require(!in_swap, "already swapping");
+      in_swap = true;
       _;
       in_swap = false;
     }
 
     event TaxRatesChanged();
-    event swapForLiquidity(string);
+    event SwapForBNB(string);
     event BalancerRatio(uint256);
+    event RewardTaxChanged();
+    event AddLiq(string);
 
     constructor (address _router) {
          _balances[msg.sender] = _totalSupply;
@@ -148,41 +153,39 @@ contract iBNB is IERC20, Ownable {
         uint256 senderBalance = _balances[sender]; // gas SLOAD: 200 vs MLOAD: 3 ...
         require(senderBalance >= amount, "ERC20: transfer amount exceeds balance");
 
-        uint256 sell_tax = 0;
-        uint256 balancer_amount;
+        uint256 sell_tax;
         uint256 dev_tax;
+        uint256 balancer_amount;
+
+        if(excluded[sender] == false && excluded[recipient] == false) {
 
         // ----  Sell tax  ----
-        (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
-        if(address(this) != pair.token0()) { // 0 := iBNB
-          (_reserve0, _reserve1) = (_reserve1, _reserve0);
-        }
-        if(sender != address(pair) && excluded_from_taxes[sender] == false) {
+          (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
+          if(address(this) != pair.token0()) { // 0 := iBNB
+            (_reserve0, _reserve1) = (_reserve1, _reserve0);
+          }
           sell_tax = sellingTax(sender, amount, _reserve0); //will update the balancer ledger too
-        }
-        // else sell_tax stays 0;
 
         // ------ dev tax 0.1% -------
-        dev_tax = amount.mul(1).div(1000);
+          dev_tax = amount.mul(1).div(1000);
 
         // ------ balancer tax 9.9% ------
-        balancer_amount = amount.mul(99).div(1000);
-        balancer(balancer_amount, _reserve0);
+          balancer_amount = amount.mul(99).div(1000);
+          balancer(balancer_amount, _reserve0);
 
-        //@dev every extra token are collected into address(this), it's the balancer job to then split them
-        //between pool and reward, using his the dedicated struct
-        _balances[sender] = senderBalance - amount;
-        _balances[recipient] += amount.sub(sell_tax).sub(dev_tax).sub(balancer_amount);
-        _balances[address(this)] += sell_tax.sum(balancer_amount);
-        _balances[devWallet] += dev_tax;
-
-
-        // ------ update reward for recipient ---
-        if(now > _last_tx[recipient].last_new_reward_epoch + 1 days) {
-          _last_tx[recipient].last_new_reward_epoch = now;
-          _last_tx[recipient].token_basis_for_reward = _balances[recipient];
+          //@dev every extra token are collected into address(this), it's the balancer job to then split them
+          //between pool and reward, using the dedicated struct
+          _balances[address(this)] += sell_tax.add(balancer_amount);
+          _balances[devWallet] += dev_tax;
+        }
+        else {
+          sell_tax = 0;
+          dev_tax = 0;
+          balancer_amount = 0;
         }
 
+        _balances[sender] = senderBalance.sub(amount);
+        _balances[recipient] += amount.sub(sell_tax).sub(dev_tax).sub(balancer_amount);
 
         emit Transfer(sender, recipient, amount);
         emit Transfer(sender, address(this), sell_tax);
@@ -192,11 +195,11 @@ contract iBNB is IERC20, Ownable {
 
 //TODO Gas optim
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
-    //the thresholds defined in selling_taxes_thresholds on a daily (calendar) basis
-    function sellingTax(address sender, address recipient, uint256 amount, uint256 pool_balance) private returns(uint256) {
-
-        uint16[5] memory _tax_tranches = selling_taxes_tranches; //gas optim
+    //the thresholds defined in selling_taxes_thresholds on 24h floating window
+    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
+        uint16[5] memory _tax_tranches = selling_taxes_tranches;
         past_tx memory sender_last_tx = _last_tx[sender];
+
         uint256 sell_tax = 0;
 
 //TODO : double check time
@@ -224,10 +227,10 @@ contract iBNB is IERC20, Ownable {
         }
         //else sell_tax stays at 0
 
-        _last_tx[sender].last_timestamp = block.timestamp;
+        _last_tx[sender].last_timestamp = block.timestamp; //reset timer, for reward too
         _last_tx[sender].cum_transfer = sender_last_tx.cum_transfer.add(amount);
 
-        balancer_balances.reward_pool += sell_tax;
+        balancer_balances.reward_pool += sell_tax; //sell tax is for reward:)
 
         return sell_tax;
     }
@@ -237,6 +240,7 @@ contract iBNB is IERC20, Ownable {
     function balancer(uint256 amount, uint256 pool_balance) private {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
+
         uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
 
         balancer_balances.reward_pool += amount.mul(ratio).div(100);
@@ -248,7 +252,7 @@ contract iBNB is IERC20, Ownable {
         }
 
         if(!in_swap && balancer_balances.reward_pool >= swap_for_reward_threshold) {
-            uint256 token_out = addBNB(balancer_balances.reward_pool);
+            uint256 token_out = swapForBNB(balancer_balances.reward_pool, address(this));
             balancer_balances.reward_pool -= token_out;
         }
 
@@ -272,17 +276,75 @@ contract iBNB is IERC20, Ownable {
       try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
         uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
         router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_contract, block.timestamp); //will not be catched
+        emit AddLiq("Liquidity added");
+        return token_amount;
       }
       catch {
-        emit swapForLiquidity("swapToken failure");
+        emit AddLiq("addLiq: fail");
+        return 0;
+      }
+//TODO : library swap ? Or just function
+
+    }
+
+    //@dev reward prop to proportion of total supply owned, claimed daily
+    //to insure dynamic balancing.
+    //if an extra-buy occurs in the last 24h (cum_sum > BNB_basis), reset 24h timer
+    //(frontend will automatize claim then buy)
+    function computeReward() public view returns(uint256) {
+
+      past_tx memory sender_last_tx = _last_tx[msg.sender];
+      uint256 last_claim = sender_last_tx.last_claim;
+
+      if(last_claim + 1 days > block.timestamp) { // 1 claim every 24h max
         return 0;
       }
 
-      emit swapForLiquidity("Liquidity added");
-      return token_amount;
+      address DEAD = address(0x000000000000000000000000000000000000dEaD);
+
+      uint256 circulating_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
+      uint256 supply_owned = _balances[msg.sender].div(circulating_supply);
+      uint256 time_factor = (block.timestamp - last_claim).div(1 days);
+
+      uint256 reward_without_penalty = supply_owned.mul(balancer_balances.reward_pool).mul(time_factor).div(circulating_supply);
+
+      return reward_without_penalty.sub(taxOnClaim(getQuoteInBNB(reward_without_penalty)));
     }
 
-    function addBNB(uint256 token_amount) internal inSwap returns (uint256) {
+    //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
+    //but not swapped (token from claimer to the reward pool).
+    function taxOnClaim(uint256 amount) public view returns(uint256 tax){
+
+      if(amount > 2 ether) { return amount.mul(claiming_taxes_rates[4]).div(100); } //GIVE US FINNEY'S BACK
+      else if(amount > 1.50 ether) { return amount.mul(claiming_taxes_rates[3]).div(100); }
+      else if(amount > 1 ether) { return amount.mul(claiming_taxes_rates[2]).div(100); }
+      else if(amount > 0.5 ether) { return amount.mul(claiming_taxes_rates[1]).div(100); }
+      else if(amount > 0.25 ether) { return amount.mul(claiming_taxes_rates[0]).div(100); }
+      else { return 0; }
+
+    }
+
+    //@dev for frontend integration
+    function wenClaim() public view returns (uint256) {
+      return _last_tx[msg.sender].last_claim + 1 days;
+    }
+
+    function claimReward() public{
+      uint256 claimable = computeReward();
+      require(claimable > 0, "nothing to claim");
+      _last_tx[msg.sender].last_claim = block.timestamp;
+      swapForBNB(computeReward(), msg.sender);
+    }
+
+    function getQuoteInBNB(uint256 nb_token) public view returns (uint256) {
+      (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
+      if(address(this) != pair.token0()) { // 0 := iBNB
+        (_reserve0, _reserve1) = (_reserve1, _reserve0);
+      }
+      return router.getAmountOut(nb_token, _reserve0, _reserve1);
+    }
+
+    function swapForBNB(uint256 token_amount, address receiver) internal inSwap returns (uint256) {
       address[] memory route = new address[](2);
       route[0] = address(this);
       route[1] = router.WETH();
@@ -291,59 +353,26 @@ contract iBNB is IERC20, Ownable {
         _approve(address(this), address(router), ~uint256(0));
       }
 
-      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount, 0, route, address(this), block.timestamp) {
-        emit swapForLiquidity("Liquidity added");
+      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount, 0, route, receiver, block.timestamp) {
+        emit SwapForBNB("Ok");
         return token_amount;
       }
       catch {
-        emit swapForLiquidity("swapToken failure");
+        emit SwapForBNB("Err");
         return 0;
       }
 
 
     }
 
-    //-----------------------------TODO BNB reward computing&claim + tax
-
-
-    //@dev reward prop to proportion of total supply owned, claimed daily
-    //to insure dynamic balancing.
-    //if an extra-buy occurs in the last 24h (cum_sum > BNB_basis), higher tax rate
-    function computeReward(address sender) public returns(uint256) {
-
-      past_tx memory sender_last_tx = _last_tx[sender];
-      uint256 last_timestamp = sender_last_tx.last_timestamp;
-      uint256 cum_transfer = sender_last_tx.cum_transfer;
-      uint256 token_basis_for_reward = sender_last_tx.token_basis_for_reward;
-      address DEAD = address(0x000000000000000000000000000000000000dEaD);
-
-      uint256 supply_owned = balanceOf(msg.sender) / (totalSupply()-_balances[DEAD]-_balances[address(pair)]);
-      uint256 reward theo = supply_owned * bnb_pool_balance
-
-
-              reward = reward_theo - taxes for too early
-
-      return reward;
+    function excludeFromTaxes(address adr) public onlyOwner {
+      require(!excluded[adr], "already excluded");
+      excluded[adr] = true;
     }
-
-    //@dev for frontend integration
-    function claimable() public returns (bool) {
-      return (block.timestamp / 8400 > _sender_last_tx.last_timestamp);
+    function includeInTaxes(address adr) public onlyOwner {
+      require(excluded[adr], "already taxed");
+      excluded[adr] = false;
     }
-
-    function claimReward() public{
-
-      //check
-      if(_sender_last_tx.last_claim != block.timestamp / 8400
-        && block.timestamp / 8400 > (block.timestamp - _sender_last_tx.last_timestamp) / 8400) {
-            PSEUDO : computeReward
-            store last claim //effect
-            withdraw  //interaction
-
-      }
-    }
-
-
     function resetBalancer() public onlyOwner {
       uint256 _contract_balance = balanceOf(address(this));
       balancer_balances.reward_pool = _contract_balance.div(2);
@@ -365,5 +394,9 @@ contract iBNB is IERC20, Ownable {
     function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
       selling_taxes_rates = new_amounts;
       emit TaxRatesChanged();
+    }
+    function setRewardTaxesTranches(uint8[5] memory new_tranches) public onlyOwner {
+      claiming_taxes_rates = new_tranches;
+      emit RewardTaxChanged();
     }
 }
