@@ -8,4 +8,7 @@ module.exports = function(deployer, network) {
   else if (network="bsc") {
     deployer.deploy(iBNB, "0x10ED43C718714eb63d5aA57B78B54704E256024E");
   }
+  else if (network="ganache") {
+    deployer.deploy(iBNB, "0x10ED43C718714eb63d5aA57B78B54704E256024E");
+  }
 };
