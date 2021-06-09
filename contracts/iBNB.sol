@@ -54,6 +54,7 @@ contract iBNB is IERC20, Ownable {
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
 
     bool in_swap;
+    bool public circuit_breaker;
 
     string private _name = "iBNB";
     string private _symbol = "iBNB";
@@ -89,6 +90,8 @@ contract iBNB is IERC20, Ownable {
          genesis_timestamp = block.timestamp;
          LP_contract = msg.sender;  //temp set, then switch to the LP Lock
          devWallet = msg.sender;
+
+         circuit_breaker == false
     }
 
     function decimals() public view returns (uint256) {
@@ -146,7 +149,6 @@ contract iBNB is IERC20, Ownable {
     }
 
 
-//TODO: circuit breaker !!!!!
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
         require(sender != address(0), "ERC20: transfer from the zero address");
 
@@ -157,7 +159,7 @@ contract iBNB is IERC20, Ownable {
         uint256 dev_tax;
         uint256 balancer_amount;
 
-        if(excluded[sender] == false && excluded[recipient] == false) {
+        if(excluded[sender] == false && excluded[recipient] == false && circuit_breaker == false) {
 
         // ----  Sell tax  ----
           (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
@@ -200,9 +202,8 @@ contract iBNB is IERC20, Ownable {
         uint16[5] memory _tax_tranches = selling_taxes_tranches;
         past_tx memory sender_last_tx = _last_tx[sender];
 
-        uint256 sell_tax = 0;
+        uint256 sell_tax;
 
-//TODO : double check time
         //>1 day since last tx
         if(block.timestamp > sender_last_tx.last_timestamp + 1 days) {
           _last_tx[sender].cum_transfer = 0; // a.k.a The Virgin
@@ -225,7 +226,7 @@ contract iBNB is IERC20, Ownable {
         else if(new_cum_sum > pool_balance.mul(_tax_tranches[0]).div(10**7)) {
           sell_tax = amount.mul(selling_taxes_rates[0]).div(100);
         }
-        //else sell_tax stays at 0
+        else { sell_tax = 0; }
 
         _last_tx[sender].last_timestamp = block.timestamp; //reset timer, for reward too
         _last_tx[sender].cum_transfer = sender_last_tx.cum_transfer.add(amount);
@@ -235,12 +236,11 @@ contract iBNB is IERC20, Ownable {
         return sell_tax;
     }
 
-//TODO : GAS OPTIM/Glob var
-    //@dev take the 9.9% taxes as input, split it according to pool condition
+    //@dev take the 9.9% taxes as input, split it between reward and liq subpools
+    //according to pool condition
     function balancer(uint256 amount, uint256 pool_balance) private {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-
         uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
 
         balancer_balances.reward_pool += amount.mul(ratio).div(100);
@@ -283,8 +283,6 @@ contract iBNB is IERC20, Ownable {
         emit AddLiq("addLiq: fail");
         return 0;
       }
-//TODO : library swap ? Or just function
-
     }
 
     //@dev reward prop to proportion of total supply owned, claimed daily
@@ -325,7 +323,7 @@ contract iBNB is IERC20, Ownable {
     }
 
     //@dev for frontend integration
-    function wenClaim() public view returns (uint256) {
+    function whenClaim() public view returns (uint256) {
       return _last_tx[msg.sender].last_claim + 1 days;
     }
 
@@ -377,6 +375,9 @@ contract iBNB is IERC20, Ownable {
       uint256 _contract_balance = balanceOf(address(this));
       balancer_balances.reward_pool = _contract_balance.div(2);
       balancer_balances.liquidity_pool = _contract_balance.div(2);
+    }
+    function setCircuitBreaker(bool status) public onlyOwner {
+      circuit_breaker == status;
     }
     function setLPContract(address _LP_contract) public onlyOwner {
       LP_contract = _LP_contract;
