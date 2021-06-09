@@ -42,7 +42,6 @@ contract iBNB is IERC20, Ownable {
 
     uint256 private _decimals = 9;
     uint256 private _totalSupply = 10**15 * 10**_decimals;
-    uint256 genesis_timestamp;
     uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
     uint256 public swap_for_reward_threshold = 10**14 * 10**_decimals;
 
@@ -50,8 +49,8 @@ contract iBNB is IERC20, Ownable {
     //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
     //therefore value are div by 10**7
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
-    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000];
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
+    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000];
 
     bool in_swap;
     bool public circuit_breaker;
@@ -86,12 +85,10 @@ contract iBNB is IERC20, Ownable {
          router = IUniswapV2Router02(_router);
          IUniswapV2Factory factory = IUniswapV2Factory(router.factory());
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
-
-         genesis_timestamp = block.timestamp;
          LP_contract = msg.sender;  //temp set, then switch to the LP Lock
          devWallet = msg.sender;
 
-         circuit_breaker == false
+         circuit_breaker == false;
     }
 
     function decimals() public view returns (uint256) {
@@ -195,7 +192,6 @@ contract iBNB is IERC20, Ownable {
         emit Transfer(sender, devWallet, dev_tax);
     }
 
-//TODO Gas optim
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
     //the thresholds defined in selling_taxes_thresholds on 24h floating window
     function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
@@ -377,7 +373,7 @@ contract iBNB is IERC20, Ownable {
       balancer_balances.liquidity_pool = _contract_balance.div(2);
     }
     function setCircuitBreaker(bool status) public onlyOwner {
-      circuit_breaker == status;
+      circuit_breaker = status;
     }
     function setLPContract(address _LP_contract) public onlyOwner {
       LP_contract = _LP_contract;
