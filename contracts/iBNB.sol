@@ -54,7 +54,7 @@ contract iBNB is IERC20, Ownable {
     string private _name = "iBNB";
     string private _symbol = "iBNB";
 
-    address LP_contract;
+    address LP_recipient;
     address devWallet;
 
     IUniswapV2Pair pair;
@@ -76,12 +76,15 @@ contract iBNB is IERC20, Ownable {
     event AddLiq(string);
 
     constructor (address _router) {
+
          _balances[msg.sender] = _totalSupply;
+
          //create pair to get the pair address
          router = IUniswapV2Router02(_router);
          IUniswapV2Factory factory = IUniswapV2Factory(router.factory());
-         pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
-         LP_contract = msg.sender;  //temp set, then switch to the LP Lock
+         pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH());
+
+         LP_recipient = msg.sender;  //temp set, then switch to the LP Lock
          devWallet = msg.sender;
 
          circuit_breaker == false;
@@ -267,7 +270,7 @@ contract iBNB is IERC20, Ownable {
 
       try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
         uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
-        router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_contract, block.timestamp); //will not be catched
+        router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_recipient, block.timestamp); //will not be catched
         emit AddLiq("Liquidity added");
         return token_amount;
       }
@@ -371,8 +374,8 @@ contract iBNB is IERC20, Ownable {
     function setCircuitBreaker(bool status) public onlyOwner {
       circuit_breaker = status;
     }
-    function setLPContract(address _LP_contract) public onlyOwner {
-      LP_contract = _LP_contract;
+    function setLPContract(address _LP_recipient) public onlyOwner {
+      LP_recipient = _LP_recipient;
     }
     function setDevWallet(address _devWallet) public onlyOwner {
       devWallet = _devWallet;
