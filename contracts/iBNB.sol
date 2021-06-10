@@ -300,7 +300,7 @@ contract iBNB is IERC20, Ownable {
       uint256 time_factor = (block.timestamp - last_claim).div(1 days);
 
       uint256 reward_without_penalty = supply_owned.mul(balancer_balances.reward_pool).mul(time_factor).div(circulating_supply);
-      uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty))
+      uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty));
       return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
     }
 
