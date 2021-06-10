@@ -19,6 +19,7 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 contract iBNB is IERC20, Ownable {
     using SafeMath for uint256;
+//TODO BEFORE DEPLOYMENT: Reduce visibility as needed
 
     struct past_tx {
       uint256 cum_transfer; //this is not what you think, you perv
@@ -54,13 +55,13 @@ contract iBNB is IERC20, Ownable {
     string private _name = "iBNB";
     string private _symbol = "iBNB";
 
-    address LP_recipient;
-    address devWallet;
+    address public LP_recipient;
+    address public devWallet;
 
-    IUniswapV2Pair pair;
-    IUniswapV2Router02 router;
+    IUniswapV2Pair public pair;
+    IUniswapV2Router02 public router;
 
-    prop_balances balancer_balances;
+    prop_balances public balancer_balances;
 
     modifier inSwap {
       require(!in_swap, "already swapping");
@@ -182,6 +183,9 @@ contract iBNB is IERC20, Ownable {
           balancer_amount = 0;
         }
 
+        //reward reinit
+        _last_tx[recipient].last_timestamp = block.timestamp;
+
         _balances[sender] = senderBalance.sub(amount);
         _balances[recipient] += amount.sub(sell_tax).sub(dev_tax).sub(balancer_amount);
 
@@ -223,7 +227,6 @@ contract iBNB is IERC20, Ownable {
         }
         else { sell_tax = 0; }
 
-        _last_tx[sender].last_timestamp = block.timestamp; //reset timer, for reward too
         _last_tx[sender].cum_transfer = sender_last_tx.cum_transfer.add(amount);
 
         balancer_balances.reward_pool += sell_tax; //sell tax is for reward:)
@@ -282,7 +285,7 @@ contract iBNB is IERC20, Ownable {
 
     //@dev reward prop to proportion of total supply owned, claimed daily
     //to insure dynamic balancing.
-    //if an extra-buy occurs in the last 24h (cum_sum > BNB_basis), reset 24h timer
+    //if an extra-buy occurs in the last 24h, reset 24h timer
     //(frontend will automatize claim then buy)
     function computeReward() public view returns(uint256, uint256) {
 
@@ -290,17 +293,21 @@ contract iBNB is IERC20, Ownable {
       uint256 last_claim = sender_last_tx.last_claim;
 
       if(last_claim + 1 days > block.timestamp) { // 1 claim every 24h max
-        return 0;
+        return (0, 0);
       }
 
       address DEAD = address(0x000000000000000000000000000000000000dEaD);
 
       uint256 circulating_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
-      uint256 supply_owned = _balances[msg.sender].div(circulating_supply);
-      uint256 time_factor = (block.timestamp - last_claim).div(1 days);
 
-      uint256 reward_without_penalty = supply_owned.mul(balancer_balances.reward_pool).mul(time_factor).div(circulating_supply);
+      //@dev (balance/circ supply) * [(now-lastClaim)/1d] * BNB_balance
+      uint256 _nom = _balances[msg.sender].mul(balanceOf(address(this))).mul(block.timestamp - last_claim);
+      uint256 _denom = circulating_supply.mul(1 days);
+
+      uint256 reward_without_penalty = _nom.div(_denom);
+
       uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty));
+
       return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
     }
 
@@ -323,11 +330,11 @@ contract iBNB is IERC20, Ownable {
     }
 
     function claimReward() public{
-      uint256 (claimable, tax) = computeReward();
+      (uint256 claimable, uint256 tax) = computeReward();
       require(claimable > 0, "nothing to claim");
       _last_tx[msg.sender].last_claim = block.timestamp;
       balancer_balances.reward_pool += tax;
-      swapForBNB(claimable, msg.sender);
+      safeTransferETH(msg.sender, claimable);
     }
 
     function getQuoteInBNB(uint256 nb_token) public view returns (uint256) {
@@ -355,8 +362,12 @@ contract iBNB is IERC20, Ownable {
         emit SwapForBNB("Err");
         return 0;
       }
+    }
 
-
+    //@dev taken from uniswapV2 TransferHelper lib
+    function safeTransferETH(address to, uint value) internal {
+        (bool success,) = to.call{value:value}(new bytes(0));
+        require(success, 'TransferHelper: ETH_TRANSFER_FAILED');
     }
 
     function excludeFromTaxes(address adr) public onlyOwner {
@@ -381,7 +392,7 @@ contract iBNB is IERC20, Ownable {
     function setDevWallet(address _devWallet) public onlyOwner {
       devWallet = _devWallet;
     }
-    function setSwapThreshold(uint256 threshold_in_token) public onlyOwner {
+    function setSwapForLiqThreshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
     }
     function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
