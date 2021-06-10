@@ -47,7 +47,7 @@ contract iBNB is IERC20, Ownable {
     //therefore value are div by 10**7
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
-    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // div by 10**5 0.0125-0.0250-(...)
+    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // div by 10**4 0.0125-0.0250-(...)
 
     bool in_swap;
     bool public circuit_breaker;
@@ -168,7 +168,7 @@ contract iBNB is IERC20, Ownable {
           sell_tax = sellingTax(sender, amount, _reserve0); //will update the balancer ledger too
 
         // ------ dev tax 0.1% -------
-          dev_tax = amount.mul(1).div(1000);
+          dev_tax = amount.div(1000);
 
         // ------ balancer tax 9.9% ------
           balancer_amount = amount.mul(99).div(1000);
@@ -212,19 +212,19 @@ contract iBNB is IERC20, Ownable {
 
         uint256 new_cum_sum = amount.add(_last_tx[sender].cum_transfer);
 
-        if(new_cum_sum > pool_balance.mul(_tax_tranches[4]).div(10**5)) {
+        if(new_cum_sum > pool_balance.mul(_tax_tranches[4]).div(10**4)) {
           revert("Selling tax: above max amount");
         }
-        else if(new_cum_sum > pool_balance.mul(_tax_tranches[3]).div(10**5)) {
+        else if(new_cum_sum > pool_balance.mul(_tax_tranches[3]).div(10**4)) {
           sell_tax = amount.mul(selling_taxes_rates[3]).div(100);
         }
-        else if(new_cum_sum > pool_balance.mul(_tax_tranches[2]).div(10**5)) {
+        else if(new_cum_sum > pool_balance.mul(_tax_tranches[2]).div(10**4)) {
           sell_tax = amount.mul(selling_taxes_rates[2]).div(100);
         }
-        else if(new_cum_sum > pool_balance.mul(_tax_tranches[1]).div(10**5)) {
+        else if(new_cum_sum > pool_balance.mul(_tax_tranches[1]).div(10**4)) {
           sell_tax = amount.mul(selling_taxes_rates[1]).div(100);
         }
-        else if(new_cum_sum > pool_balance.mul(_tax_tranches[0]).div(10**5)) {
+        else if(new_cum_sum > pool_balance.mul(_tax_tranches[0]).div(10**4)) {
           sell_tax = amount.mul(selling_taxes_rates[0]).div(100);
         }
         else { sell_tax = 0; }

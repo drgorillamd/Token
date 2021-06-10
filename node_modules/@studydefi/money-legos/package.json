@@ -1,0 +1,50 @@
+{
+  "name": "@studydefi/money-legos",
+  "version": "2.4.2",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "repository": "git@github.com:studydefi/money-legos.git",
+  "author": "Adrian Li <li.adrianmc@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "yarn clean && tsc --declaration && cp package.json dist && cp README.md dist",
+    "postbuild": "copyfiles --verbose -u 1 src/**/*.sol dist",
+    "build:docs": "embedme docs/* && yarn build && node scripts/genAddrMainnetOverview.js > docs/overview_mainnet_address.md",
+    "serve:docs": "docsify serve ./docs",
+    "test": "jest --verbose",
+    "link": "yarn build && cd dist && npm link",
+    "prepublishOnly": "echo \"Error: Don't run 'npm publish' in root. Use 'npm run dist' instead.\" && exit 1",
+    "dist": "cd dist && npm publish --ignore-scripts --access public"
+  },
+  "devDependencies": {
+    "@types/jest": "^25.2.1",
+    "@types/node": "^13.13.0",
+    "copyfiles": "^2.2.0",
+    "docsify-cli": "^4.4.0",
+    "dotenv": "^8.2.0",
+    "embedme": "^1.21.0",
+    "ethers": "^4.0.46",
+    "ganache-core": "^2.10.2",
+    "jest": "^25.3.0",
+    "json2md": "^1.7.0",
+    "ts-jest": "^25.3.1",
+    "typescript": "^3.8.3"
+  },
+  "prettier": {
+    "trailingComma": "all"
+  },
+  "keywords": [
+    "ethereum",
+    "abi",
+    "defi",
+    "defi addresses",
+    "defi abi",
+    "ethereum abi",
+    "ethereum address",
+    "money-legos"
+  ],
+  "dependencies": {
+    "@openzeppelin/contracts": "^2.5.0"
+  }
+}
