@@ -82,7 +82,7 @@ contract iBNB is IERC20, Ownable {
          //create pair to get the pair address
          router = IUniswapV2Router02(_router);
          IUniswapV2Factory factory = IUniswapV2Factory(router.factory());
-         pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH());
+         pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
          LP_recipient = msg.sender;  //temp set, then switch to the LP Lock
          devWallet = msg.sender;
