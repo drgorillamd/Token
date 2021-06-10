@@ -284,7 +284,7 @@ contract iBNB is IERC20, Ownable {
     //to insure dynamic balancing.
     //if an extra-buy occurs in the last 24h (cum_sum > BNB_basis), reset 24h timer
     //(frontend will automatize claim then buy)
-    function computeReward() public view returns(uint256) {
+    function computeReward() public view returns(uint256, uint256) {
 
       past_tx memory sender_last_tx = _last_tx[msg.sender];
       uint256 last_claim = sender_last_tx.last_claim;
@@ -300,8 +300,8 @@ contract iBNB is IERC20, Ownable {
       uint256 time_factor = (block.timestamp - last_claim).div(1 days);
 
       uint256 reward_without_penalty = supply_owned.mul(balancer_balances.reward_pool).mul(time_factor).div(circulating_supply);
-
-      return reward_without_penalty.sub(taxOnClaim(getQuoteInBNB(reward_without_penalty)));
+      uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty))
+      return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
     }
 
     //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
@@ -323,10 +323,11 @@ contract iBNB is IERC20, Ownable {
     }
 
     function claimReward() public{
-      uint256 claimable = computeReward();
+      uint256 (claimable, tax) = computeReward();
       require(claimable > 0, "nothing to claim");
       _last_tx[msg.sender].last_claim = block.timestamp;
-      swapForBNB(computeReward(), msg.sender);
+      balancer_balances.reward_pool += tax;
+      swapForBNB(claimable, msg.sender);
     }
 
     function getQuoteInBNB(uint256 nb_token) public view returns (uint256) {
