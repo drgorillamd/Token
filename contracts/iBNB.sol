@@ -19,11 +19,16 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 contract iBNB is IERC20, Ownable {
     using SafeMath for uint256;
-//TODO BEFORE DEPLOYMENT: Reduce visibility as needed
+
+
+//TODO BEFORE DEPLOYMENT: Reduce visibility as needed --
+//FUNCTION ARE ALL PUBLIC FOR DEBUGGING PURPOSE
+
+
 
     struct past_tx {
       uint256 cum_transfer; //this is not what you think, you perv
-      uint256 last_timestamp; //no choice, uint256
+      uint256 last_timestamp;
       uint256 last_claim;
     }
 
@@ -49,7 +54,6 @@ contract iBNB is IERC20, Ownable {
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
     uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // div by 10**4 0.0125-0.0250-(...)
 
-    bool in_swap;
     bool public circuit_breaker;
 
     string private _name = "iBNB";
@@ -63,12 +67,9 @@ contract iBNB is IERC20, Ownable {
 
     prop_balances public balancer_balances;
 
-    modifier inSwap {
-      require(!in_swap, "already swapping");
-      in_swap = true;
-      _;
-      in_swap = false;
-    }
+    //modifier inSwap {
+    //    just kidding, we're not safemoon
+    //}
 
     event TaxRatesChanged();
     event SwapForBNB(string);
@@ -85,8 +86,8 @@ contract iBNB is IERC20, Ownable {
          IUniswapV2Factory factory = IUniswapV2Factory(router.factory());
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
-         LP_recipient = msg.sender;  //temp set, then switch to the LP Lock
-         devWallet = msg.sender;
+         LP_recipient = address(0);
+         devWallet = address(0);
 
          excluded[msg.sender] = true;
 
@@ -237,21 +238,22 @@ contract iBNB is IERC20, Ownable {
     }
 
     //@dev take the 9.9% taxes as input, split it between reward and liq subpools
-    //according to pool condition
+    //    according to pool condition -> pool/circ supply closer to one implies
+    //    priority to the reward pool
     function balancer(uint256 amount, uint256 pool_balance) private {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-        uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]);
+        uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]); //in % to minimize rounding err
 
         balancer_balances.reward_pool += amount.mul(ratio).div(100);
         balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
 
-        if(!in_swap && balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+        if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
             balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
         }
 
-        if(!in_swap && balancer_balances.reward_pool >= swap_for_reward_threshold) {
+        if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
             uint256 token_out = swapForBNB(balancer_balances.reward_pool, address(this));
             balancer_balances.reward_pool -= token_out;
         }
@@ -262,7 +264,7 @@ contract iBNB is IERC20, Ownable {
     //@dev when triggered, will swap and provide liquidity
     //    BNBfromSwap being the difference between and after the swap, slippage
     //    will result in extra-BNB for the reward pool (free money for the guys:)
-    function addLiquidity(uint256 token_amount) internal inSwap returns (uint256) {
+    function addLiquidity(uint256 token_amount) internal returns (uint256) {
       uint256 BNBfromReward = address(this).balance;
 
       address[] memory route = new address[](2);
@@ -276,7 +278,7 @@ contract iBNB is IERC20, Ownable {
       try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
         uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
         router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_recipient, block.timestamp); //will not be catched
-        emit AddLiq("Liquidity added");
+        emit AddLiq("addLiq: ok");
         return token_amount;
       }
       catch {
@@ -285,10 +287,11 @@ contract iBNB is IERC20, Ownable {
       }
     }
 
-    //@dev reward prop to proportion of total supply owned, claimed daily
-    //to insure dynamic balancing.
-    //if an extra-buy occurs in the last 24h, reset 24h timer
-    //(frontend will automatize claim then buy)
+    //@dev individual reward is growing linearly througout 24h, and is the portion of the reward pool
+    //     weighted by the circ. supply owned.
+    //     reward = (balance/circ supply) * [(now - lastClaim) / 1d] * BNB_balance
+    //     If an extra-buy occurs in the last 24h, reset 24h timer (in sell tax)
+    //     (frontend will automatize claim then buy)
     function computeReward() public view returns(uint256, uint256) {
 
       past_tx memory sender_last_tx = _last_tx[msg.sender];
@@ -302,7 +305,6 @@ contract iBNB is IERC20, Ownable {
 
       uint256 circulating_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
 
-      //@dev (balance/circ supply) * [(now-lastClaim)/1d] * BNB_balance
       uint256 _nom = _balances[msg.sender].mul(balanceOf(address(this))).mul(block.timestamp - last_claim);
       uint256 _denom = circulating_supply.mul(1 days);
 
@@ -314,7 +316,7 @@ contract iBNB is IERC20, Ownable {
     }
 
     //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
-    //but not swapped (token from claimer to the reward pool).
+    //    but *not* swapped before actual claim (token from claimer staying in the reward pool).
     function taxOnClaim(uint256 amount) public view returns(uint256 tax){
 
       if(amount > 2 ether) { return amount.mul(claiming_taxes_rates[4]).div(100); } //GIVE US FINNEY'S BACK
@@ -326,28 +328,30 @@ contract iBNB is IERC20, Ownable {
 
     }
 
-    //@dev for frontend integration
+    //@dev frontend integration
     function whenClaim() public view returns (uint256) {
       return _last_tx[msg.sender].last_claim + 1 days;
     }
 
-    function claimReward() public{
+    //@dev computeReward check if last claim is less than 1d ago
+    function claimReward() public {
       (uint256 claimable, uint256 tax) = computeReward();
-      require(claimable > 0, "nothing to claim");
+      require(claimable > 0, "Claim: 0");
       _last_tx[msg.sender].last_claim = block.timestamp;
       balancer_balances.reward_pool += tax;
+      emit Transfer(msg.sender, address(this), tax);
       safeTransferETH(msg.sender, claimable);
     }
 
     function getQuoteInBNB(uint256 nb_token) public view returns (uint256) {
       (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
-      if(address(this) != pair.token0()) { // 0 := iBNB
+      if(address(this) != pair.token0()) { // 0 <- iBNB
         (_reserve0, _reserve1) = (_reserve1, _reserve0);
       }
       return router.getAmountOut(nb_token, _reserve0, _reserve1);
     }
 
-    function swapForBNB(uint256 token_amount, address receiver) internal inSwap returns (uint256) {
+    function swapForBNB(uint256 token_amount, address receiver) public returns (uint256) {
       address[] memory route = new address[](2);
       route[0] = address(this);
       route[1] = router.WETH();
@@ -361,7 +365,7 @@ contract iBNB is IERC20, Ownable {
         return token_amount;
       }
       catch {
-        emit SwapForBNB("Err");
+        emit SwapForBNB("Fail");
         return 0;
       }
     }
@@ -385,6 +389,9 @@ contract iBNB is IERC20, Ownable {
       balancer_balances.reward_pool = _contract_balance.div(2);
       balancer_balances.liquidity_pool = _contract_balance.div(2);
     }
+
+    //@dev will bypass all the taxes and act as erc20.
+    //     pools & balancer balances will remain untouched
     function setCircuitBreaker(bool status) public onlyOwner {
       circuit_breaker = status;
     }

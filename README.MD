@@ -5,4 +5,4 @@ Launch ganache-cli -f https://bsc-dataseed.binance.org/ --account $PRIVATE_KEY,1
 
 or Launch ganache-cli -f https://bsc-dataseed.binance.org/ -m $MNEMO
 
-And truffle test --network ganache
+And truffle test --network ganache --show-events
