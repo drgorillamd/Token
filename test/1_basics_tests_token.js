@@ -4,7 +4,7 @@ const truffleAssert = require('truffle-assertions');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 
-contract("Token", accounts => {
+contract("Basic tests", accounts => {
 
   before(async function() {
     const x = await Token.new(routerAddress);

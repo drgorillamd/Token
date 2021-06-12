@@ -6,7 +6,7 @@ const pairContract = artifacts.require('IUniswapV2Pair');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 
-contract("Token", accounts => {
+contract("LP and taxes", accounts => {
 
   const to_send = 1260000;
   const pool_balance = 10**8;
@@ -75,7 +75,7 @@ contract("Token", accounts => {
       const x = await Token.deployed();
       const bal = await x.balancer_balances.call();
       const bal_sum = bal[0].toNumber() + bal[1].toNumber()
-      assert.equal(bal_sum, to_send * 99/1000 + (to_send * 2 / 100) , "Incorrect amount transfered to balancer pools");
+      assert.equal(bal_sum, to_send * 99/1000 + (to_send * 2 / 100)-1 , "Incorrect amount transfered to balancer pools");
     });
 
     it("Transfer standard: Reward pool status", async () => {
@@ -87,7 +87,7 @@ contract("Token", accounts => {
       const a = await x.balancer_balances.call();
       const reward_obs_pool = a[0];
 
-      assert.equal(reward_obs_pool.toNumber(), reward_theo_pool, "incorrect reward pool");
+      assert.equal(reward_obs_pool.toNumber(), Math.floor(reward_theo_pool), "incorrect reward pool");
     });
 
     it("Transfer standard: Liquidity pool status", async () => {
@@ -98,7 +98,7 @@ contract("Token", accounts => {
       const a = await x.balancer_balances.call();
       const liq_obs_pool = a[1];
 
-      assert.equal(liq_obs_pool.toNumber(), liq_theo_pool, "incorrect liq pool");
+      assert.equal(liq_obs_pool.toNumber(), Math.floor(liq_theo_pool), "incorrect liq pool");
     });
 
   });

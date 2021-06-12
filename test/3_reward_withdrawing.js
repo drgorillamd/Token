@@ -6,10 +6,10 @@ const pairContract = artifacts.require('IUniswapV2Pair');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 
-contract("Token", accounts => {
+contract("Reward", accounts => {
 
   const to_send = 10**7;
-  const amount_BNB = 50 * 10**18;
+  const amount_BNB = 98 * 10**18;
   const pool_balance = '1' + '0'.repeat(20);
 
   before(async function() {
@@ -48,77 +48,48 @@ contract("Token", accounts => {
 
   });
 
-  describe("Regular transfers", () => {
+  //tricking the balancer to trigger a swap
+  describe("Balancer setting", () => {
 
-    it("Transfer standards: 10x10", async () => {
+    it("Transfer to contract > 2 * swap for reward threshold -100", async () => {
       const x = await Token.deployed();
+      await x.transfer(x.address, (2*10**9)-100, { from: accounts[0] });
+      const newBal = await x.balanceOf.call(x.address);
+      assert.equal(newBal.toNumber(), (2*10**9)-100, "Transfer Failure");
+    });
 
-      for (let i = 1; i < 10; i++) {
-        await x.transfer(accounts[i], to_send*100, { from: accounts[0] });
-      }
+    it("Reset balancer", async () => {
+      const x = await Token.deployed();
+      await x.resetBalancer({from: accounts[0]});
+      const new_bal = await x.balancer_balances.call();
+      const subbal = new_bal[0];  //when reset, ratio at 50/50
 
-      for (let i = 1; i < 10; i++) {
-        for (let j = 1; j < 10; j++) {
-          await truffleCost.log(x.transfer(accounts[j], to_send*10, { from: accounts[i] }), 'USD'); //will return LAST cost only
-        }
-      }
-
-      const newBal = await x.balanceOf.call(accounts[1]);
-      assert.notEqual(newBal.toNumber(), 0, "Transfer Failure");
+      assert.equal(subbal.toNumber(), ((2*10**9)-100)/2, "Balancer error");
     });
 
     it("Reward pool status", async () => {
       const x = await Token.deployed();
       const a = await x.balancer_balances.call();
-      const reward_obs_pool = a[0].toNumber();
-      console.log(reward_obs_pool);
-      assert.notEqual(reward_obs_pool, 0, "Reward pool failure");
+      const reward_obs_pool = a[0];
+      assert.notEqual(reward_obs_pool.toNumber(), 0, "Reward pool failure");
+    });
+  });
+
+  describe("Reward Mechanics: Swap", () => {
+    it("Transfers to trigger swap - wish me luck", async () => {
+      const x = await Token.deployed();
+      await x.transfer(accounts[1], 10**9, { from: accounts[0] });
+      await truffleCost.log(x.transfer(accounts[2], 10**9, { from: accounts[1] }));
+      const newBal = await x.balanceOf.call(accounts[2]);
+      assert.notEqual(newBal.toNumber(), 0, "Transfer Failure");
     });
 
-
-  describe("Reward Mechanic", () => {
     it("BNB balance", async () => {
       const x = await Token.deployed();
-
       const bal = await web3.eth.getBalance(x.address);
-      console.log(bal);
       assert.notEqual(bal, 0, "Swap Failure");
     });
   });
-/*
-
-    //@dev /!\ reward pool receive the sell tax as well !!!
-    it("Transfer standard: balancer balances", async () => {
-      const x = await Token.deployed();
-      const bal = await x.balancer_balances.call();
-      const bal_sum = bal[0].toNumber() + bal[1].toNumber()
-      assert.equal(bal_sum, to_send * 99/1000 + (to_send * 2 / 100) , "Incorrect amount transfered to balancer pools");
-    });
 
 
-    it("Transfer standard: Reward pool status", async () => {
-      const x = await Token.deployed();
-      const totalSupply = await x.totalSupply.call();
-
-      const t = to_send * 99 / 1000 * (pool_balance / totalSupply);//9.9% of 1260000 * (pool_balance / circ_supply) +
-      const reward_theo_pool = t + (to_send * 2 / 100);
-      const a = await x.balancer_balances.call();
-      const reward_obs_pool = a[0];
-
-      assert.equal(reward_obs_pool.toNumber(), reward_theo_pool, "incorrect reward pool");
-    });
-
-    it("Transfer standard: Liquidity pool status", async () => {
-      const x = await Token.deployed();
-      const totalSupply = await x.totalSupply.call();
-
-      const liq_theo_pool = to_send * 99 / 1000 * (1 -(pool_balance / totalSupply)); //9.9% of 1260000 * [1 - (pool_balance / circ_supply)]
-      const a = await x.balancer_balances.call();
-      const liq_obs_pool = a[1];
-
-      assert.equal(liq_obs_pool.toNumber(), liq_theo_pool, "incorrect reward pool");
-    });
-
-  });*/
-  });
 });

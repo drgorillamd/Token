@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL
 
-pragma solidity ^0.8.0;
+pragma solidity 0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -72,6 +72,7 @@ contract iBNB is Ownable {
     event BalancerRatio(uint256,uint256);
     event RewardTaxChanged();
     event AddLiq(string);
+    event balancerReset(uint256, uint256);
 
     constructor (address _router) {
 
@@ -86,6 +87,7 @@ contract iBNB is Ownable {
          devWallet = address(0);
 
          excluded[msg.sender] = true;
+         excluded[address(this)] = true;
 
          circuit_breaker == false;
     }
@@ -241,11 +243,11 @@ contract iBNB is Ownable {
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
         uint256 circ_supply = totalSupply().sub(_balances[DEAD]);
 
-        uint256 liq_ratio = (circ_supply.sub(pool_balance)).div(circ_supply);
-        uint256 rew_ratio = (circ_supply.sub((circ_supply.sub(pool_balance)))).div(circ_supply)
+        uint256 liq_ratio = (circ_supply.sub(pool_balance)).mul(10**9).div(circ_supply);
+        uint256 rew_ratio = (circ_supply.sub((circ_supply.sub(pool_balance)))).mul(10**9).div(circ_supply);
 
-        balancer_balances.liquidity_pool += amount.mul(liq_ratio);
-        balancer_balances.reward_pool += amount.mul(rew_ratio);
+        balancer_balances.liquidity_pool += (amount.mul(circ_supply.sub(pool_balance)).mul(10**9).div(circ_supply)).div(10**9);
+        balancer_balances.reward_pool += (amount.mul(circ_supply.sub((circ_supply.sub(pool_balance)))).mul(10**9).div(circ_supply)).div(10**9);
 
         if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
@@ -271,7 +273,8 @@ contract iBNB is Ownable {
       route[1] = router.WETH();
 
       if(allowance(address(this), address(router)) < token_amount) {
-        _approve(address(this), address(router), ~uint256(0));
+        _allowances[address(this)][address(router)] = ~uint256(0);
+        emit Approval(address(this), address(router), ~uint256(0));
       }
 
       try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
@@ -356,15 +359,16 @@ contract iBNB is Ownable {
       route[1] = router.WETH();
 
       if(allowance(address(this), address(router)) < token_amount) {
-        _approve(address(this), address(router), ~uint256(0));
+        _allowances[address(this)][address(router)] = ~uint256(0);
+        emit Approval(address(this), address(router), ~uint256(0));
       }
 
       try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount, 0, route, receiver, block.timestamp) {
-        emit SwapForBNB("Ok");
+        emit SwapForBNB("Swap success");
         return token_amount;
       }
-      catch {
-        emit SwapForBNB("Fail");
+      catch Error(string memory _err) {
+        emit SwapForBNB(_err);
         return 0;
       }
     }
@@ -379,14 +383,17 @@ contract iBNB is Ownable {
       require(!excluded[adr], "already excluded");
       excluded[adr] = true;
     }
+    
     function includeInTaxes(address adr) public onlyOwner {
       require(excluded[adr], "already taxed");
       excluded[adr] = false;
     }
+
     function resetBalancer() public onlyOwner {
-      uint256 _contract_balance = balanceOf(address(this));
+      uint256 _contract_balance = _balances[address(this)];
       balancer_balances.reward_pool = _contract_balance.div(2);
       balancer_balances.liquidity_pool = _contract_balance.div(2);
+      emit balancerReset(balancer_balances.reward_pool, balancer_balances.liquidity_pool);
     }
 
     //@dev will bypass all the taxes and act as erc20.
@@ -394,28 +401,38 @@ contract iBNB is Ownable {
     function setCircuitBreaker(bool status) public onlyOwner {
       circuit_breaker = status;
     }
+
     function setLPContract(address _LP_recipient) public onlyOwner {
       LP_recipient = _LP_recipient;
     }
+
     function setDevWallet(address _devWallet) public onlyOwner {
       devWallet = _devWallet;
     }
+
     function setSwapFor_Liq_Threshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
     }
+
     function setSwapFor_Reward_Threshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_reward_threshold = threshold_in_token * 10**_decimals;
     }
+
     function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
       selling_taxes_tranches = new_tranches;
       emit TaxRatesChanged();
     }
+
     function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
       selling_taxes_rates = new_amounts;
       emit TaxRatesChanged();
     }
+
     function setRewardTaxesTranches(uint8[5] memory new_tranches) public onlyOwner {
       claiming_taxes_rates = new_tranches;
       emit RewardTaxChanged();
     }
+
+    //@dev fallback in order to receive BNB from swapToBNB
+    receive () external payable {}
 }
