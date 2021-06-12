@@ -239,10 +239,10 @@ contract iBNB is Ownable {
     function balancer(uint256 amount, uint256 pool_balance) public {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-        uint256 ratio = pool_balance.mul(10000).div(totalSupply()-_balances[DEAD]);
+        uint256 ratio = pool_balance.mul(10**8).div(totalSupply()-_balances[DEAD]); // PRECISION ERROR -> inverse?
 
-        balancer_balances.reward_pool += amount.mul(ratio).div(10000);
-        balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(10000);
+        balancer_balances.reward_pool += amount.mul(ratio).div(10**8);
+        balancer_balances.liquidity_pool += amount.mul(10**8 - ratio).div(10**8);
 
         if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
