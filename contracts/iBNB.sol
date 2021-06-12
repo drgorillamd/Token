@@ -242,7 +242,7 @@ contract iBNB is Ownable {
         uint256 ratio = pool_balance.mul(10**8).div(totalSupply()-_balances[DEAD]); // PRECISION ERROR -> inverse?
 
         balancer_balances.reward_pool += amount.mul(ratio).div(10**8);
-        balancer_balances.liquidity_pool += amount.mul(10**8 - ratio).div(10**8);
+        balancer_balances.liquidity_pool += amount.mul(10**8 - ratio).div(10**8);  //TO TEST
 
         if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
