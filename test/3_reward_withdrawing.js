@@ -8,34 +8,24 @@ const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 contract("Token", accounts => {
 
-  const to_send = 1260000;
-  const pool_balance = 10**8;
+  const to_send = 10**7;
+  const amount_BNB = 50 * 10**18;
+  const pool_balance = '1' + '0'.repeat(20);
 
   before(async function() {
     const x = await Token.new(routerAddress);
   });
 
-  describe("Adding Liq", () => {
-    it("Circuit Breaker: Enabled", async () => {
+  describe("Setting the Scene", () => {
+
+    it("Adding Liq", async () => { //from 2_liqAdd & Taxes
       const x = await Token.deployed();
       await x.setCircuitBreaker(true, {from: accounts[0]});
       const status_circ_break = await x.circuit_breaker.call();
-      assert.equal(true, status_circ_break, "Circuit breaker not set");
-    });
-
-    it("Router testing", async () => {
-      const x = await Token.deployed();
       const router = await routerContract.at(routerAddress);
-      assert.notEqual(0, await router.WETH.call(), "router down");
-    });
-
-    it("Adding liquidity: 10^8 token & 4BNB", async () => {
-      const amount_BNB = 4*10**18;
       const amount_token = pool_balance;
       const sender = accounts[0];
 
-      const x = await Token.deployed();
-      const router = await routerContract.at(routerAddress);
       let _ = await x.approve(routerAddress, amount_token);
       await router.addLiquidityETH(x.address, amount_token, 0, 0, accounts[0], 1907352278, {value: amount_BNB}); //9y from now. Are you from the future? Did we make it?
 
@@ -43,32 +33,59 @@ contract("Token", accounts => {
       const pair = await pairContract.at(pairAdr);
       const LPBalance = await pair.balanceOf.call(accounts[0]);
 
-      assert.notEqual(LPBalance.toNumber(), 0, "No LP token received");
+      await x.setCircuitBreaker(false, {from: accounts[0]});
+
+      assert.notEqual(LPBalance, 0, "No LP token received / check Uni pool");
     });
 
-    it("Circuit Breaker: Disabled", async () => {
+    it("Lowering SwapForLiqThreshold", async () => {
       const x = await Token.deployed();
-      await x.setCircuitBreaker(false, {from: accounts[0]});
-      const status_circ_break = await x.circuit_breaker.call();
-      assert.equal(false, status_circ_break, "Circuit breaker not set");
+      await x.setSwapFor_Reward_Threshold(1);
+      const val = await x.swap_for_reward_threshold.call();
+      assert.equal(val.toNumber(), 1*10**9, "Wrong threshold");
     });
+
+
   });
 
-
-  //[ 0          2,       4,       6,        8        revert]    Sell tax(%)
-  //[   0.0125,     250,     500,      750,     1000]	    	     Tranche(% of pool bal)
   describe("Regular transfers", () => {
 
-    it("Transfer standard: single -- 1.26m / 0.0126% of pool", async () => {
+    it("Transfer standards: 10x10", async () => {
       const x = await Token.deployed();
-      const to_receive = to_send - (to_send * 0.1) - (to_send * 2 / 100); // 10% taxes + sell_tax of 0.0126% of the pool ->2%
-      const sender = accounts[1];
-      const receiver = accounts[2];
-      await x.transfer(sender, to_send, { from: accounts[0] });
-      await truffleCost.log(x.transfer(receiver, to_send, { from: sender }), 'USD');
-      const newBal = await x.balanceOf.call(receiver);
-      assert.equal(newBal.toNumber(), to_receive, "incorrect amount transfered");
+
+      for (let i = 1; i < 10; i++) {
+        await x.transfer(accounts[i], to_send*100, { from: accounts[0] });
+      }
+
+      for (let i = 1; i < 10; i++) {
+        for (let j = 1; j < 10; j++) {
+          await truffleCost.log(x.transfer(accounts[j], to_send*10, { from: accounts[i] }), 'USD'); //will return LAST cost only
+        }
+      }
+
+      const newBal = await x.balanceOf.call(accounts[1]);
+      assert.notEqual(newBal.toNumber(), 0, "Transfer Failure");
     });
+
+    it("Reward pool status", async () => {
+      const x = await Token.deployed();
+      const a = await x.balancer_balances.call();
+      const reward_obs_pool = a[0].toNumber();
+      console.log(reward_obs_pool);
+      assert.notEqual(reward_obs_pool, 0, "Reward pool failure");
+    });
+
+
+  describe("Reward Mechanic", () => {
+    it("BNB balance", async () => {
+      const x = await Token.deployed();
+
+      const bal = await web3.eth.getBalance(x.address);
+      console.log(bal);
+      assert.notEqual(bal, 0, "Swap Failure");
+    });
+  });
+/*
 
     //@dev /!\ reward pool receive the sell tax as well !!!
     it("Transfer standard: balancer balances", async () => {
@@ -77,6 +94,7 @@ contract("Token", accounts => {
       const bal_sum = bal[0].toNumber() + bal[1].toNumber()
       assert.equal(bal_sum, to_send * 99/1000 + (to_send * 2 / 100) , "Incorrect amount transfered to balancer pools");
     });
+
 
     it("Transfer standard: Reward pool status", async () => {
       const x = await Token.deployed();
@@ -98,8 +116,9 @@ contract("Token", accounts => {
       const a = await x.balancer_balances.call();
       const liq_obs_pool = a[1];
 
-      assert.equal(liq_obs_pool.toNumber(), liq_theo_pool, "incorrect liq pool");
+      assert.equal(liq_obs_pool.toNumber(), liq_theo_pool, "incorrect reward pool");
     });
 
+  });*/
   });
 });

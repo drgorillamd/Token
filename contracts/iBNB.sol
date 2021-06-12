@@ -2,7 +2,6 @@
 
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
@@ -17,13 +16,12 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
  *
  */
 
-contract iBNB is IERC20, Ownable {
+contract iBNB is Ownable {
     using SafeMath for uint256;
 
 
 //TODO BEFORE DEPLOYMENT: Reduce visibility as needed --
-//FUNCTION ARE ALL PUBLIC FOR DEBUGGING PURPOSE
-
+//FUNCTION ARE ALL PUBLIC FOR DEBUGGING PURPOSES
 
 
     struct past_tx {
@@ -44,8 +42,8 @@ contract iBNB is IERC20, Ownable {
 
     uint256 private _decimals = 9;
     uint256 private _totalSupply = 10**15 * 10**_decimals;
-    uint256 public swap_for_liquidity_threshold = 10**14 * 10**_decimals; //10%
-    uint256 public swap_for_reward_threshold = 10**14 * 10**_decimals;
+    uint256 public swap_for_liquidity_threshold = 10**13 * 10**_decimals; //1%
+    uint256 public swap_for_reward_threshold = 10**13 * 10**_decimals;
 
 //TODO gas optim:
     //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
@@ -67,10 +65,8 @@ contract iBNB is IERC20, Ownable {
 
     prop_balances public balancer_balances;
 
-    //modifier inSwap {
-    //    just kidding, we're not safemoon
-    //}
-
+    event Approval(address, address, uint256);
+    event Transfer(address, address, uint256);
     event TaxRatesChanged();
     event SwapForBNB(string);
     event BalancerRatio(uint256);
@@ -103,24 +99,24 @@ contract iBNB is IERC20, Ownable {
     function symbol() public view returns (string memory) {
         return _symbol;
     }
-    function totalSupply() public view virtual override returns (uint256) {
+    function totalSupply() public view virtual  returns (uint256) {
         return _totalSupply;
     }
-    function balanceOf(address account) public view virtual override returns (uint256) {
+    function balanceOf(address account) public view virtual  returns (uint256) {
         return _balances[account];
     }
-    function transfer(address recipient, uint256 amount) public virtual override returns (bool) {
+    function transfer(address recipient, uint256 amount) public virtual  returns (bool) {
         _transfer(_msgSender(), recipient, amount);
         return true;
     }
-    function allowance(address owner, address spender) public view virtual override returns (uint256) {
+    function allowance(address owner, address spender) public view virtual  returns (uint256) {
         return _allowances[owner][spender];
     }
-    function approve(address spender, uint256 amount) public virtual override returns (bool) {
+    function approve(address spender, uint256 amount) public virtual  returns (bool) {
         _approve(_msgSender(), spender, amount);
         return true;
     }
-    function transferFrom(address sender, address recipient, uint256 amount) public virtual override returns (bool) {
+    function transferFrom(address sender, address recipient, uint256 amount) public virtual  returns (bool) {
         _transfer(sender, recipient, amount);
 
         uint256 currentAllowance = _allowances[sender][_msgSender()];
@@ -240,13 +236,13 @@ contract iBNB is IERC20, Ownable {
     //@dev take the 9.9% taxes as input, split it between reward and liq subpools
     //    according to pool condition -> pool/circ supply closer to one implies
     //    priority to the reward pool
-    function balancer(uint256 amount, uint256 pool_balance) private {
+    function balancer(uint256 amount, uint256 pool_balance) public {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-        uint256 ratio = pool_balance.mul(100).div(totalSupply()-_balances[DEAD]); //in % to minimize rounding err
+        uint256 ratio = pool_balance.mul(10000).div(totalSupply()-_balances[DEAD]);
 
-        balancer_balances.reward_pool += amount.mul(ratio).div(100);
-        balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(100);
+        balancer_balances.reward_pool += amount.mul(ratio).div(10000);
+        balancer_balances.liquidity_pool += amount.mul(100 - ratio).div(10000);
 
         if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
@@ -401,8 +397,11 @@ contract iBNB is IERC20, Ownable {
     function setDevWallet(address _devWallet) public onlyOwner {
       devWallet = _devWallet;
     }
-    function setSwapForLiqThreshold(uint256 threshold_in_token) public onlyOwner {
+    function setSwapFor_Liq_Threshold(uint256 threshold_in_token) public onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
+    }
+    function setSwapFor_Reward_Threshold(uint256 threshold_in_token) public onlyOwner {
+      swap_for_reward_threshold = threshold_in_token * 10**_decimals;
     }
     function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
       selling_taxes_tranches = new_tranches;
