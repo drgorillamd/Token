@@ -69,7 +69,7 @@ contract iBNB is Ownable {
     event Transfer(address, address, uint256);
     event TaxRatesChanged();
     event SwapForBNB(string);
-    event BalancerRatio(uint256);
+    event BalancerRatio(uint256,uint256);
     event RewardTaxChanged();
     event AddLiq(string);
 
@@ -234,16 +234,18 @@ contract iBNB is Ownable {
     }
 
     //@dev take the 9.9% taxes as input, split it between reward and liq subpools
-    //    according to pool condition -> pool/circ supply closer to one implies
+    //    according to pool condition -> circ-pool/circ supply closer to one implies
     //    priority to the reward pool
     function balancer(uint256 amount, uint256 pool_balance) public {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-        uint256 circ_supply = totalSupply()-_balances[DEAD]
-        uint256 ratio = pool_balance.div(totalSupply()-_balances[DEAD]); // PRECISION ERROR -> (circ - pool)/circ !!!!
+        uint256 circ_supply = totalSupply().sub(_balances[DEAD]);
 
-        balancer_balances.reward_pool += amount.mul(ratio).div(10**8);
-        balancer_balances.liquidity_pool += amount.mul(10**8 - ratio).div(10**8);  //TO TEST
+        uint256 liq_ratio = (circ_supply.sub(pool_balance)).div(circ_supply);
+        uint256 rew_ratio = (circ_supply.sub((circ_supply.sub(pool_balance)))).div(circ_supply)
+
+        balancer_balances.liquidity_pool += amount.mul(liq_ratio);
+        balancer_balances.reward_pool += amount.mul(rew_ratio);
 
         if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
             uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
@@ -255,7 +257,7 @@ contract iBNB is Ownable {
             balancer_balances.reward_pool -= token_out;
         }
 
-        emit BalancerRatio(ratio);
+        emit BalancerRatio(liq_ratio, rew_ratio);
     }
 
     //@dev when triggered, will swap and provide liquidity
