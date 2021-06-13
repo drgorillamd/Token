@@ -44,13 +44,13 @@ contract iBNB is Ownable {
     uint256 private _totalSupply = 10**15 * 10**_decimals;
     uint256 public swap_for_liquidity_threshold = 10**13 * 10**_decimals; //1%
     uint256 public swap_for_reward_threshold = 10**13 * 10**_decimals;
+    uint256 public pcs_pool_to_circ_ratio = 10;
 
 //TODO gas optim:
-    //@dev in percents : 0.125% - 0.25 - 0.5 - 0.75 - 0.1%
-    //therefore value are div by 10**7
+
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
-    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // div by 10**4 0.0125-0.0250-(...)
+    uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // % and div by 10**4 0.0125% -0.025% -(...)
 
     bool public circuit_breaker;
 
@@ -241,7 +241,9 @@ contract iBNB is Ownable {
     function balancer(uint256 amount, uint256 pool_balance) public {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
-        uint256 circ_supply = totalSupply().sub(_balances[DEAD]);
+        uint256 unwght_circ_supply = totalSupply().sub(_balances[DEAD]);
+
+        uint256 circ_supply = (pool_balance < unwght_circ_supply * pcs_pool_to_circ_ratio / 100) ? unwght_circ_supply * pcs_pool_to_circ_ratio / 100 : pool_balance;
 
         uint256 liq_ratio = (circ_supply.sub(pool_balance)).mul(10**9).div(circ_supply);
         uint256 rew_ratio = (circ_supply.sub((circ_supply.sub(pool_balance)))).mul(10**9).div(circ_supply);
@@ -383,7 +385,7 @@ contract iBNB is Ownable {
       require(!excluded[adr], "already excluded");
       excluded[adr] = true;
     }
-    
+
     function includeInTaxes(address adr) public onlyOwner {
       require(excluded[adr], "already taxed");
       excluded[adr] = false;
