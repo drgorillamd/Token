@@ -7,7 +7,7 @@ advanceTimeAndBlock = async (time) => {
 
 advanceTime = (time) => {
     return new Promise((resolve, reject) => {
-        web3.currentProvider.sendAsync({
+        web3.currentProvider.send({
             jsonrpc: "2.0",
             method: "evm_increaseTime",
             params: [time],
@@ -21,7 +21,7 @@ advanceTime = (time) => {
 
 advanceBlock = () => {
     return new Promise((resolve, reject) => {
-        web3.currentProvider.sendAsync({
+        web3.currentProvider.send({
             jsonrpc: "2.0",
             method: "evm_mine",
             id: new Date().getTime()

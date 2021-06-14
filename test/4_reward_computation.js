@@ -8,7 +8,6 @@ require('chai').use(require('chai-bn')(BN)).should();
 const Token = artifacts.require("iBNB");
 const routerContract = artifacts.require('IUniswapV2Router02');
 const pairContract = artifacts.require('IUniswapV2Pair');
-
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 
@@ -18,6 +17,8 @@ contract("Reward computation", accounts => {
   const amount_BNB = 98 * 10**18;
   const pool_balance = '98' + '0'.repeat(19);
   //98 BNB and 98*10**10 iBNB -> 10**10 iBNB/BNB
+  const tot_sup = '1' + '0'.repeat(24);
+  const half_sup = '5' + '0'.repeat(23);
 
   before(async function() {
     const x = await Token.new(routerAddress);
@@ -28,13 +29,11 @@ contract("Reward computation", accounts => {
     it("Adding Liq", async () => { //from 2_liqAdd & Taxes
       const x = await Token.deployed();
       await x.setCircuitBreaker(true, {from: accounts[0]});
-      const status_circ_break = await x.circuit_breaker.call();
       const router = await routerContract.at(routerAddress);
-      const amount_token = pool_balance;
       const sender = accounts[0];
 
-      let _ = await x.approve(routerAddress, amount_token);
-      await router.addLiquidityETH(x.address, amount_token, 0, 0, accounts[0], 1907352278, {value: amount_BNB}); //9y from now. Are you from the future? Did we make it?
+      let _ = await x.approve(routerAddress, pool_balance);
+      await router.addLiquidityETH(x.address, pool_balance, 0, 0, accounts[0], 1907352278, {value: amount_BNB}); //9y from now. Are you from the future? Did we make it?
 
       const pairAdr = await x.pair.call();
       const pair = await pairContract.at(pairAdr);
@@ -45,75 +44,77 @@ contract("Reward computation", accounts => {
       assert.notEqual(LPBalance, 0, "No LP token received / check Uni pool");
     });
 
-    it("Lowering swap_for_reward_thresholdThreshold", async () => {
+    it("Sending 1 BNB and 50% supply to EOA", async () => { //from 2_liqAdd & Taxes
       const x = await Token.deployed();
-      await x.setSwapFor_Reward_Threshold(1);
-      const expected = new BN(1*10**9);
-      const val = await x.swap_for_reward_threshold.call();
-      val.should.be.a.bignumber.that.equals(expected);
-    });
-
-
-  });
-
-  //tricking the balancer to trigger a swap
-  describe("Balancer setting", () => {
-
-    it("Transfer to contract > 2 * swap for reward threshold -100", async () => {
-      const x = await Token.deployed();
-      await x.transfer(x.address, (2*10**9)-100, { from: accounts[0] });
-      const newBal = await x.balanceOf.call(x.address);
-      const expected = new BN((2*10**9)-100);
-      newBal.should.be.a.bignumber.that.equals(expected);
-    });
-
-    it("Reset balancer", async () => {
-      const x = await Token.deployed();
-      await x.resetBalancer({from: accounts[0]});
-      const new_bal = await x.balancer_balances.call();
-      const subbal = new_bal[0];  //when reset, ratio at 50/50
-      const expected = new BN(((2*10**9)-100)/2);
-      subbal.should.be.a.bignumber.that.equals(expected);
-    });
-
-    it("Reward pool status", async () => {
-      const x = await Token.deployed();
-      const a = await x.balancer_balances.call();
-      const reward_obs_pool = a[0];
-      assert.notEqual(reward_obs_pool, 0, "Reward pool failure");
-    });
-  });
-
-  describe("Reward Mechanics: Swap", () => {
-    it("Transfers to trigger swap - wish me luck", async () => {
-      const x = await Token.deployed();
-      await x.transfer(accounts[1], 10**9, { from: accounts[0] });
-      await truffleCost.log(x.transfer(accounts[2], 10**9, { from: accounts[1] }));
-      const newBal = await x.balanceOf.call(accounts[2]);
-      assert.notEqual(newBal, 0, "Transfer Failure");
-    });
-
-    it("BNB balance", async () => {
-      const x = await Token.deployed();
+      await x.setCircuitBreaker(true, {from: accounts[0]});
+      await x.transfer(accounts[1], half_sup, {from: accounts[0]});
+      await x.setCircuitBreaker(false, {from: accounts[0]});
+      await x.send('1'+'0'.repeat(18), {from: accounts[5]});
       const bal = await web3.eth.getBalance(x.address);
-      assert.notEqual(bal, 0, "Swap Failure");
+      assert.equal(bal, '1'+'0'.repeat(18), "No BNB received");
+      const bal_token = await x.balanceOf(accounts[1]);
+      assert.equal(bal_token, half_sup, "No token received");
     });
   });
 
-  describe("Reward Mechanics: internal functions", () => {
-    it("getQuoteInBNB()", async () => {
+  describe("computeReward()", () => {
+
+    // 98 * 10**19 in pool
+    // owned: 5*10**23
+    //
+    let init_reward;
+    let reinit_reward;
+
+    it("Reward at t=0 - theo:0", async () => {
       const x = await Token.deployed();
-      const quote = await x.getQuoteInBNB('1'+'0'.repeat(18));
-      assert.notEqual(quote, 0, "Wrong quote");
+      const reward_and_tax = await x.computeReward({from: accounts[1]});
+      const reward = reward_and_tax[0];
+      console.log("t0 : "+reward.toString());
+      assert.equal(reward, 0, "Invalid reward");
     });
 
-    it("taxOnClaim()", async () => {  // [2, 4, 6, 8, 15];
+    it("Reward at t=1 sec", async () => {
       const x = await Token.deployed();
-      const tax = await x.taxOnClaim('7'+'0'.repeat(17)); //
-      const expected = '28'+'0'.repeat(15);
-      assert.equal(tax.toString(), expected, "Wrong tax");
+      await time.advanceTimeAndBlock(1);
+      const reward_and_tax = await x.computeReward({from: accounts[1]});
+      const reward = reward_and_tax[0];
+      init_reward = reward;
+      console.log("t1 : "+reward.toString());
+      assert.notEqual(reward, 0, "Invalid reward");
     });
+
+    it("Reward at t=6h", async () => {
+      const x = await Token.deployed();
+      await time.advanceTimeAndBlock(21600);
+      const reward_and_tax = await x.computeReward({from: accounts[1]});
+      const reward = reward_and_tax[0];
+      console.log("t6h : "+reward.toString());
+      assert.notEqual(reward, 0, "Invalid reward");
+    });
+
+    it("Reward at t=24h", async () => {
+      const x = await Token.deployed();
+      await time.advanceTimeAndBlock(86400-2-21600);
+      const reward_and_tax = await x.computeReward({from: accounts[1]});
+      const reward = reward_and_tax[0];
+      console.log("t24h : "+reward.toString());
+      assert.equal(reward, 0, "Invalid reward");
+    });
+
+    it("Reward at t=24h01", async () => {
+      const x = await Token.deployed();
+      await time.advanceTimeAndBlock(1);
+      const reward_and_tax = await x.computeReward({from: accounts[1]});
+      reinit_reward = reward_and_tax[0];
+      console.log("t1 : "+init_reward.toString());
+      console.log("t24h00:01 : "+reinit_reward.toString());
+      assert.equal(init_reward.toNumber(), reinit_reward.toNumber(), "Invalid periodicity");
+    });
+
 
   });
+
+
+
 
 });

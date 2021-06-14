@@ -36,7 +36,7 @@ contract iBNB is Ownable {
     }
 
     mapping (address => uint256) private _balances;
-    mapping (address => past_tx) private _last_tx;
+    mapping (address => past_tx) public _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
     mapping (address => bool) public excluded;
 
@@ -45,6 +45,7 @@ contract iBNB is Ownable {
     uint256 public swap_for_liquidity_threshold = 10**13 * 10**_decimals; //1%
     uint256 public swap_for_reward_threshold = 10**13 * 10**_decimals;
     uint256 public pcs_pool_to_circ_ratio = 10;
+    uint256 public reward_rate = 86400;
 
 //TODO gas optim:
 
@@ -292,8 +293,8 @@ contract iBNB is Ownable {
     }
 
     //@dev individual reward is growing linearly througout 24h, and is the portion of the reward pool
-    //     weighted by the circ. supply owned.
-    //     reward = (balance/circ supply) * [(now - lastClaim) / 1d] * BNB_balance
+    //     weighted by the "free" (ie non-pool non-death) supply owned.
+    //     reward = (balance/free supply) * [(now - lastClaim) / 1d] * BNB_balance
     //     If an extra-buy occurs in the last 24h, reset 24h timer (in sell tax)
     //     (frontend will automatize claim then buy)
     function computeReward() public view returns(uint256, uint256) {
@@ -307,16 +308,21 @@ contract iBNB is Ownable {
 
       address DEAD = address(0x000000000000000000000000000000000000dEaD);
 
-      uint256 circulating_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
+      uint256 claimable_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
+      uint256 time_factor = (block.timestamp - sender_last_tx.last_timestamp) % reward_rate;
 
-      uint256 _nom = _balances[msg.sender].mul(balanceOf(address(this))).mul(block.timestamp - last_claim);
-      uint256 _denom = circulating_supply.mul(1 days);
+      uint256 _nom = _balances[msg.sender].mul(address(this).balance).mul(time_factor);
+      uint256 _denom = claimable_supply.mul(1 days);
 
       uint256 reward_without_penalty = _nom.div(_denom);
 
-      uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty));
+      //@dev uni revert on 0
+      if(reward_without_penalty > 0) {
+        uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty));
+        return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
+      }
 
-      return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
+      return (0,0); //too small (that's what she said)
     }
 
     //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
@@ -341,7 +347,6 @@ contract iBNB is Ownable {
       (uint256 claimable, uint256 tax) = computeReward();
       require(claimable > 0, "Claim: 0");
       _last_tx[msg.sender].last_claim = block.timestamp;
-      balancer_balances.reward_pool += tax;
       emit Transfer(msg.sender, address(this), tax);
       safeTransferETH(msg.sender, claimable);
     }
@@ -432,6 +437,10 @@ contract iBNB is Ownable {
     function setRewardTaxesTranches(uint8[5] memory new_tranches) public onlyOwner {
       claiming_taxes_rates = new_tranches;
       emit RewardTaxChanged();
+    }
+
+    function setRewardRate(uint256 new_periodicity) public onlyOwner {
+      reward_rate = new_periodicity;
     }
 
     //@dev fallback in order to receive BNB from swapToBNB
