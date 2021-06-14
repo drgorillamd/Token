@@ -320,7 +320,6 @@ contract iBNB is Ownable {
     }
 
     //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
-    //    but *not* swapped before actual claim (token from claimer staying in the reward pool).
     function taxOnClaim(uint256 amount) public view returns(uint256 tax){
 
       if(amount > 2 ether) { return amount.mul(claiming_taxes_rates[4]).div(100); } //GIVE US FINNEY'S BACK
@@ -333,7 +332,7 @@ contract iBNB is Ownable {
     }
 
     //@dev frontend integration
-    function whenClaim() public view returns (uint256) {
+    function endOfPeriod() public view returns (uint256) {
       return _last_tx[msg.sender].last_claim + 1 days;
     }
 
