@@ -311,15 +311,15 @@ contract iBNB is Ownable {
       uint256 claimable_supply = totalSupply().sub(_balances[DEAD]).sub(_balances[address(pair)]);
       uint256 time_factor = (block.timestamp - sender_last_tx.last_timestamp) % reward_rate;
 
-      uint256 _nom = _balances[msg.sender].mul(address(this).balance).mul(time_factor);
+      uint256 _nom = _balances[msg.sender].mul(time_factor).mul(address(this).balance);
       uint256 _denom = claimable_supply.mul(1 days);
 
-      uint256 reward_without_penalty = _nom.div(_denom);
+      uint256 gross_reward_in_BNB = _nom.div(_denom);
 
-      //@dev uni revert on 0
-      if(reward_without_penalty > 0) {
-        uint256 tax_to_pay = taxOnClaim(getQuoteInBNB(reward_without_penalty));
-        return (reward_without_penalty.sub(tax_to_pay), tax_to_pay);
+      //@dev getQuote reverts on 0
+      if(gross_reward_in_BNB > 0) {
+        uint256 tax_to_pay = taxOnClaim(gross_reward_in_BNB);
+        return (gross_reward_in_BNB.sub(tax_to_pay), tax_to_pay);
       }
 
       return (0,0); //too small (that's what she said)
@@ -408,7 +408,8 @@ contract iBNB is Ownable {
       circuit_breaker = status;
     }
 
-    function setLPContract(address _LP_recipient) public onlyOwner {
+    //@dev will point to the LP timelock (default = burn address)
+    function setLPRecipient(address _LP_recipient) public onlyOwner {
       LP_recipient = _LP_recipient;
     }
 
