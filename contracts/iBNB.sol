@@ -28,11 +28,6 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 contract iBNB is Ownable {
     using SafeMath for uint256;
 
-
-//TODO BEFORE DEPLOYMENT: Reduce visibility as needed --
-//FUNCTION ARE ALL PUBLIC FOR DEBUGGING PURPOSES
-
-
     struct past_tx {
       uint256 cum_transfer; //this is not what you think, you perv
       uint256 last_timestamp;
@@ -47,7 +42,7 @@ contract iBNB is Ownable {
     mapping (address => uint256) private _balances;
     mapping (address => past_tx) private _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
-    mapping (address => bool) public excluded;
+    mapping (address => bool) private excluded;
 
     uint8 private _decimals = 9;
     uint8 public pcs_pool_to_circ_ratio = 10;
@@ -73,7 +68,7 @@ contract iBNB is Ownable {
     IUniswapV2Pair public pair;
     IUniswapV2Router02 public router;
 
-    prop_balances public balancer_balances;
+    prop_balances private balancer_balances;
 
     event Approval(address, address, uint256);
     event Transfer(address, address, uint256);
@@ -209,7 +204,7 @@ contract iBNB is Ownable {
 
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
     //the thresholds defined in selling_taxes_thresholds on 24h floating window
-    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256 sell_tax) {
+    function sellingTax(address sender, uint256 amount, uint256 pool_balance) internal returns(uint256 sell_tax) {
         uint16[5] memory _tax_tranches = selling_taxes_tranches;
         past_tx memory sender_last_tx = _last_tx[sender];
 
@@ -247,7 +242,7 @@ contract iBNB is Ownable {
     //@dev take the 9.9% taxes as input, split it between reward and liq subpools
     //    according to pool condition -> circ-pool/circ supply closer to one implies
     //    priority to the reward pool
-    function balancer(uint256 amount, uint256 pool_balance) public {
+    function balancer(uint256 amount, uint256 pool_balance) internal {
 
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
         uint256 unwght_circ_supply = totalSupply().sub(_balances[DEAD]);
@@ -396,6 +391,10 @@ contract iBNB is Ownable {
     function includeInTaxes(address adr) external onlyOwner {
       require(excluded[adr], "already taxed");
       excluded[adr] = false;
+    }
+
+    function isExcluded(address adr) external view returns (bool){
+      return excluded[adr];
     }
 
     function resetBalancer() external onlyOwner {
