@@ -17,37 +17,48 @@ import "pancakeswap-peripheral/contracts/interfaces/IPancakeRouter02.sol";
 
 contract iBNB-presale is Ownable {
 
+using SafeMath for uint256;
 
 // -- variables --
-    using SafeMath for uint256;
+
+    mapping (address => uint256) whitelist;
 
     enum status {
       beforeSale,
-      whitelist,
-      privateSale,
+      whitelistSale,
+      randomSale,
       postSale
     }
 
     status public sale_status;
 
-    uint256 public nbOfTokenPerBNB = XXXXXX;  //pre-sale price (1T token/BNB)
+    uint256 public nbOfTokenPerBNB = 500_000_000_000;  //pre-sale price (500b token/BNB)
     uint256 private init_balance;
 
-    ERC20 public iBNB_token;
     uint256 decimal;
-    IPancakeRouter02 router; = IPancakeRouter02(0x10ED43C718714eb63d5aA57B78B54704E256024E); //BSC Mainnet
-    // IPancakeRouter02 router = IPancakeRouter02(0xD99D1c33F9fC3444f8101754aBC46c52416550D1); //BSC Testnet
+    ERC20 public iBNB_token;
+    IPancakeRouter02 router;
 
     event Buy(address, uint256, uint256);
     event LiquidityTransferred(uint256, uint256);
 
     modifier beforeSale() {
-      require(sale_status == status.presale, "Sale: already started");
+      require(sale_status == status.beforeSale, "Sale: already started");
       _;
     }
 
-    modifier duringSale() {
-      require(sale_status == status.sale, "Sale: not active");
+    modifier whitelistSale() {
+      require(sale_status == status.whitelistSale, "Sale: not in whitelistSale");
+      _;
+    }
+
+    modifier randomSale() {
+      require(sale_status == status.randomSale, "Sale: not in randomSale");
+      _;
+    }
+
+    modifier postSale() {
+      require(sale_status == status.postSale, "Sale: not in postSale");
       _;
     }
 
@@ -59,12 +70,20 @@ contract iBNB-presale is Ownable {
         sale_status = status.presale;
     }
 
+    function addWhitelisted
+
+    function addRandomized
+
 // -- sale --
 
-    function startSale() external onlyOwner {
-      sale_status = status.sale;
+    function startWhitelistSale() external beforeSale onlyOwner {
+      sale_status = status.whitelistSale;
       init_balance = token.balanceOf(address(this));
     }
+
+
+
+
 
     //@dev contract starts with whole supply
     //     will revert when < 0 token available
