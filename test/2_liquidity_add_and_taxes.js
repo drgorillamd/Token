@@ -4,7 +4,7 @@ const truffleAssert = require('truffle-assertions');
 const routerContract = artifacts.require('IUniswapV2Router02');
 const pairContract = artifacts.require('IUniswapV2Pair');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
-
+const devWallet = "0x000000000000000000000000000000000000dEaD";
 
 contract("LP and taxes", accounts => {
 
@@ -12,7 +12,7 @@ contract("LP and taxes", accounts => {
   const pool_balance = 10**8;
 
   before(async function() {
-    const x = await Token.new(routerAddress);
+    const x = await Token.new(routerAddress, devWallet);
   });
 
   describe("Adding Liq", () => {

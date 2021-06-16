@@ -9,6 +9,8 @@ const Token = artifacts.require("iBNB");
 const routerContract = artifacts.require('IUniswapV2Router02');
 const pairContract = artifacts.require('IUniswapV2Pair');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const devWallet = "0x000000000000000000000000000000000000dEaD";
+
 
 
 contract("Reward Withdraw", accounts => {
@@ -21,7 +23,7 @@ contract("Reward Withdraw", accounts => {
   const half_sup = '5' + '0'.repeat(23);
 
   before(async function() {
-    const x = await Token.new(routerAddress);
+    const x = await Token.new(routerAddress, devWallet);
   });
 
   describe("Setting the Scene", () => {

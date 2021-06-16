@@ -2,12 +2,13 @@ const Token = artifacts.require("iBNB");
 const truffleCost = require('truffle-cost');
 const truffleAssert = require('truffle-assertions');
 const routerAddress = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const devWallet = "0x000000000000000000000000000000000000dEaD";
 
 
 contract("Basic tests", accounts => {
 
   before(async function() {
-    const x = await Token.new(routerAddress);
+    const x = await Token.new(routerAddress, devWallet);
   });
 
   describe("Init state", () => {
