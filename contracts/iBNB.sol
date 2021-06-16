@@ -11,9 +11,18 @@ import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 /**
  * @dev iBNB
  *
+ * Every tx is subject to:
+ * - a sell tax, at fixed tranches (see selling_taxes_tranches and selling_taxes_rates - above the last threshold, th tx revert).
+      the sell tax is applicable on tx to the uni/pancake pool. This tax goes to the reward pool.
+ * - 0.1% flat to the team wallet
+ * - 9.9% to the balancer (which, in turn, fill 2 internal "pools" via the pro_balances struct: reward and liquidity).
+ * - a "check and trigger" on both liquidity and reward internal pools -> if they have more token than the threshold, swap is triggered
+ *   and BNB are stored in the contract (for the reward subpool) or liquidity is added to the uni pool
  *
+ * Reward is claimable daily, and is based on the % of the circulating supply (defined as total_supply-dead address balance-pool balance)
+ *  owned by the claimer; on the time since the last transfer into owner's wallet module 24; on the BNB balance of the contract :
  *
- *
+ *                  reward in BNB = (token owned / circulating supply) * [(current time - last transfer in) % 24] / 1 day * BNB contract balance
  */
 
 contract iBNB is Ownable {
@@ -36,18 +45,18 @@ contract iBNB is Ownable {
     }
 
     mapping (address => uint256) private _balances;
-    mapping (address => past_tx) public _last_tx;
+    mapping (address => past_tx) private _last_tx;
     mapping (address => mapping (address => uint256)) private _allowances;
     mapping (address => bool) public excluded;
 
-    uint256 private _decimals = 9;
+    uint8 private _decimals = 9;
+    uint8 public pcs_pool_to_circ_ratio = 10;
+
+    uint32 public reward_rate = 1 days;
+
     uint256 private _totalSupply = 10**15 * 10**_decimals;
     uint256 public swap_for_liquidity_threshold = 10**13 * 10**_decimals; //1%
     uint256 public swap_for_reward_threshold = 10**13 * 10**_decimals;
-    uint256 public pcs_pool_to_circ_ratio = 10;
-    uint256 public reward_rate = 86400;
-
-//TODO gas optim:
 
     uint8[4] public selling_taxes_rates = [2, 4, 6, 8];
     uint8[5] public claiming_taxes_rates = [2, 4, 6, 8, 15];
@@ -70,12 +79,12 @@ contract iBNB is Ownable {
     event Transfer(address, address, uint256);
     event TaxRatesChanged();
     event SwapForBNB(string);
-    event BalancerRatio(uint256,uint256);
+    event BalancerPools(uint256,uint256);
     event RewardTaxChanged();
     event AddLiq(string);
     event balancerReset(uint256, uint256);
 
-    constructor (address _router) {
+    constructor (address _router, address _devWallet) {
 
          _balances[msg.sender] = _totalSupply;
 
@@ -85,12 +94,13 @@ contract iBNB is Ownable {
          pair = IUniswapV2Pair(factory.createPair(address(this), router.WETH()));
 
          LP_recipient = address(0);
-         devWallet = address(0);
+         devWallet = _devWallet;
 
          excluded[msg.sender] = true;
          excluded[address(this)] = true;
+         excluded[devWallet] = true;
 
-         circuit_breaker == false;
+         circuit_breaker = true; //ERC20 behavior by default
     }
 
     function decimals() public view returns (uint256) {
@@ -179,11 +189,11 @@ contract iBNB is Ownable {
           _balances[address(this)] += sell_tax.add(balancer_amount);
           _balances[devWallet] += dev_tax;
         }
-        else {
-          sell_tax = 0;
-          dev_tax = 0;
-          balancer_amount = 0;
-        }
+        //else, by default:
+        //  sell_tax = 0;
+        //  dev_tax = 0;
+        //  balancer_amount = 0;
+
 
         //reward reinit
         _last_tx[recipient].last_timestamp = block.timestamp;
@@ -199,11 +209,9 @@ contract iBNB is Ownable {
 
     //@dev take a selling tax if transfer from a non-excluded address or from the pair contract exceed
     //the thresholds defined in selling_taxes_thresholds on 24h floating window
-    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256) {
+    function sellingTax(address sender, uint256 amount, uint256 pool_balance) private returns(uint256 sell_tax) {
         uint16[5] memory _tax_tranches = selling_taxes_tranches;
         past_tx memory sender_last_tx = _last_tx[sender];
-
-        uint256 sell_tax;
 
         //>1 day since last tx
         if(block.timestamp > sender_last_tx.last_timestamp + 1 days) {
@@ -244,25 +252,27 @@ contract iBNB is Ownable {
         address DEAD = address(0x000000000000000000000000000000000000dEaD);
         uint256 unwght_circ_supply = totalSupply().sub(_balances[DEAD]);
 
+        // we aim at a set % of liquidity pool (defaut 10% of circ supply), 100% in pancake swap is NOT a good news
         uint256 circ_supply = (pool_balance < unwght_circ_supply * pcs_pool_to_circ_ratio / 100) ? unwght_circ_supply * pcs_pool_to_circ_ratio / 100 : pool_balance;
 
-        uint256 liq_ratio = (circ_supply.sub(pool_balance)).mul(10**9).div(circ_supply);
-        uint256 rew_ratio = (circ_supply.sub((circ_supply.sub(pool_balance)))).mul(10**9).div(circ_supply);
+
 
         balancer_balances.liquidity_pool += (amount.mul(circ_supply.sub(pool_balance)).mul(10**9).div(circ_supply)).div(10**9);
         balancer_balances.reward_pool += (amount.mul(circ_supply.sub((circ_supply.sub(pool_balance)))).mul(10**9).div(circ_supply)).div(10**9);
 
-        if(balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
-            uint256 token_out = addLiquidity(balancer_balances.liquidity_pool);
+        prop_balances memory _balancer_balances = balancer_balances;
+
+        if(_balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+            uint256 token_out = addLiquidity(_balancer_balances.liquidity_pool);
             balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
         }
 
-        if(balancer_balances.reward_pool >= swap_for_reward_threshold) {
-            uint256 token_out = swapForBNB(balancer_balances.reward_pool, address(this));
+        if(_balancer_balances.reward_pool >= swap_for_reward_threshold) {
+            uint256 token_out = swapForBNB(_balancer_balances.reward_pool, address(this));
             balancer_balances.reward_pool -= token_out;
         }
 
-        emit BalancerRatio(liq_ratio, rew_ratio);
+        emit BalancerPools(_balancer_balances.liquidity_pool, _balancer_balances.reward_pool);
     }
 
     //@dev when triggered, will swap and provide liquidity
@@ -297,13 +307,13 @@ contract iBNB is Ownable {
     //     reward = (balance/free supply) * [(now - lastClaim) / 1d] * BNB_balance
     //     If an extra-buy occurs in the last 24h, reset 24h timer (in sell tax)
     //     (frontend will automatize claim then buy)
-    function computeReward() public view returns(uint256, uint256) {
+    //     returns net reward and tax on the reward
+    function computeReward() public view returns(uint256, uint256 tax_to_pay) {
 
       past_tx memory sender_last_tx = _last_tx[msg.sender];
-      uint256 last_claim = sender_last_tx.last_claim;
 
-      if(last_claim + 1 days > block.timestamp) { // 1 claim every 24h max
-        return (0, 0);
+      if(sender_last_tx.last_claim + reward_rate > block.timestamp) { // 1 claim every 24h max
+        return (0, 0);//too soon (that's what she said)
       }
 
       address DEAD = address(0x000000000000000000000000000000000000dEaD);
@@ -313,20 +323,13 @@ contract iBNB is Ownable {
 
       uint256 _nom = _balances[msg.sender].mul(time_factor).mul(address(this).balance);
       uint256 _denom = claimable_supply.mul(1 days);
-
       uint256 gross_reward_in_BNB = _nom.div(_denom);
-
-      //@dev getQuote reverts on 0
-      if(gross_reward_in_BNB > 0) {
-        uint256 tax_to_pay = taxOnClaim(gross_reward_in_BNB);
-        return (gross_reward_in_BNB.sub(tax_to_pay), tax_to_pay);
-      }
-
-      return (0,0); //too small (that's what she said)
+      tax_to_pay = taxOnClaim(gross_reward_in_BNB);
+      return (gross_reward_in_BNB.sub(tax_to_pay), tax_to_pay);
     }
 
     //@dev Compute the tax on claimed reward - labelled in BNB (as per team agreement)
-    function taxOnClaim(uint256 amount) public view returns(uint256 tax){
+    function taxOnClaim(uint256 amount) internal view returns(uint256 tax){
 
       if(amount > 2 ether) { return amount.mul(claiming_taxes_rates[4]).div(100); } //GIVE US FINNEY'S BACK
       else if(amount > 1.50 ether) { return amount.mul(claiming_taxes_rates[3]).div(100); }
@@ -338,12 +341,12 @@ contract iBNB is Ownable {
     }
 
     //@dev frontend integration
-    function endOfPeriod() public view returns (uint256) {
-      return _last_tx[msg.sender].last_claim + 1 days;
+    function endOfPeriod() external view returns (uint256) {
+      return _last_tx[msg.sender].last_claim + reward_rate;
     }
 
     //@dev computeReward check if last claim is less than 1d ago
-    function claimReward() public {
+    function claimReward() external {
       (uint256 claimable, uint256 tax) = computeReward();
       require(claimable > 0, "Claim: 0");
       _last_tx[msg.sender].last_claim = block.timestamp;
@@ -351,7 +354,7 @@ contract iBNB is Ownable {
       safeTransferETH(msg.sender, claimable);
     }
 
-    function getQuoteInBNB(uint256 nb_token) public view returns (uint256) {
+    function getQuoteInBNB(uint256 nb_token) internal view returns (uint256) {
       (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
       if(address(this) != pair.token0()) { // 0 <- iBNB
         (_reserve0, _reserve1) = (_reserve1, _reserve0);
@@ -359,7 +362,7 @@ contract iBNB is Ownable {
       return router.getAmountOut(nb_token, _reserve0, _reserve1);
     }
 
-    function swapForBNB(uint256 token_amount, address receiver) public returns (uint256) {
+    function swapForBNB(uint256 token_amount, address receiver) internal returns (uint256) {
       address[] memory route = new address[](2);
       route[0] = address(this);
       route[1] = router.WETH();
@@ -385,17 +388,17 @@ contract iBNB is Ownable {
         require(success, 'TransferHelper: ETH_TRANSFER_FAILED');
     }
 
-    function excludeFromTaxes(address adr) public onlyOwner {
+    function excludeFromTaxes(address adr) external onlyOwner {
       require(!excluded[adr], "already excluded");
       excluded[adr] = true;
     }
 
-    function includeInTaxes(address adr) public onlyOwner {
+    function includeInTaxes(address adr) external onlyOwner {
       require(excluded[adr], "already taxed");
       excluded[adr] = false;
     }
 
-    function resetBalancer() public onlyOwner {
+    function resetBalancer() external onlyOwner {
       uint256 _contract_balance = _balances[address(this)];
       balancer_balances.reward_pool = _contract_balance.div(2);
       balancer_balances.liquidity_pool = _contract_balance.div(2);
@@ -404,43 +407,43 @@ contract iBNB is Ownable {
 
     //@dev will bypass all the taxes and act as erc20.
     //     pools & balancer balances will remain untouched
-    function setCircuitBreaker(bool status) public onlyOwner {
+    function setCircuitBreaker(bool status) external onlyOwner {
       circuit_breaker = status;
     }
 
-    //@dev will point to the LP timelock (default = burn address)
-    function setLPRecipient(address _LP_recipient) public onlyOwner {
+    //@dev will point to the LP timelock / default = burn
+    function setLPRecipient(address _LP_recipient) external onlyOwner {
       LP_recipient = _LP_recipient;
     }
 
-    function setDevWallet(address _devWallet) public onlyOwner {
+    function setDevWallet(address _devWallet) external onlyOwner {
       devWallet = _devWallet;
     }
 
-    function setSwapFor_Liq_Threshold(uint256 threshold_in_token) public onlyOwner {
+    function setSwapFor_Liq_Threshold(uint128 threshold_in_token) external onlyOwner {
       swap_for_liquidity_threshold = threshold_in_token * 10**_decimals;
     }
 
-    function setSwapFor_Reward_Threshold(uint256 threshold_in_token) public onlyOwner {
+    function setSwapFor_Reward_Threshold(uint128 threshold_in_token) external onlyOwner {
       swap_for_reward_threshold = threshold_in_token * 10**_decimals;
     }
 
-    function setSellingTaxesTranches(uint16[5] memory new_tranches) public onlyOwner {
+    function setSellingTaxesTranches(uint16[5] memory new_tranches) external onlyOwner {
       selling_taxes_tranches = new_tranches;
       emit TaxRatesChanged();
     }
 
-    function setSellingTaxesrates(uint8[4] memory new_amounts) public onlyOwner {
+    function setSellingTaxesrates(uint8[4] memory new_amounts) external onlyOwner {
       selling_taxes_rates = new_amounts;
       emit TaxRatesChanged();
     }
 
-    function setRewardTaxesTranches(uint8[5] memory new_tranches) public onlyOwner {
+    function setRewardTaxesTranches(uint8[5] memory new_tranches) external onlyOwner {
       claiming_taxes_rates = new_tranches;
       emit RewardTaxChanged();
     }
 
-    function setRewardRate(uint256 new_periodicity) public onlyOwner {
+    function setRewardRate(uint32 new_periodicity) external onlyOwner {
       reward_rate = new_periodicity;
     }
 
