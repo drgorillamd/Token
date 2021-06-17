@@ -74,15 +74,14 @@ using SafeMath for uint256;
 
     function addRandomized
 
+
+
 // -- sale --
 
     function startWhitelistSale() external beforeSale onlyOwner {
       sale_status = status.whitelistSale;
       init_balance = token.balanceOf(address(this));
     }
-
-
-
 
 
     //@dev contract starts with whole supply
@@ -131,7 +130,7 @@ using SafeMath for uint256;
       router.addLiquidityETH{value: balance_BNB.mul(10**18)}(
           address(token),
           balance_token.mul(10**decimal),
-          balance_token.mul(10**decimal).mul(min_amount_slippage_in_percents).div(100),  //slippage is evitable.
+          balance_token.mul(10**decimal).mul(min_amount_slippage_in_percents).div(100),  //slippage is evitable...
           balance_BNB.mul(10**18).mul(min_amount_slippage_in_percents).div(100),
           owner(),
           block.timestamp
@@ -143,7 +142,7 @@ using SafeMath for uint256;
       }
 
       emit LiquidityTransferred(balance_BNB, balance_token);
-      //retrieving BNB left (normally 0) + gas optimisation
+      //retrieving BNB left (hopefully 0) + gas optimisation
       selfdestruct(payable(msg.sender));
   }
 
