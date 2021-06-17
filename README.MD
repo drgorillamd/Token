@@ -15,7 +15,10 @@ owned by the claimer; on the time since the last transfer into owner's wallet mo
 reward in BNB = (token owned / circulating supply) * [(current time - last transfer in) % 24] / 1 day * BNB contract balance
 
 
-Test on bsc mainnet :
+Test on bsc mainnet:
+
+## You'll have to change some contract' function visibility in order to pass all the tests (reduced for gas saving in prod version)
+
 Launch ganache-cli -f https://bsc-dataseed.binance.org/ --account $PRIVATE_KEY,100000000000000000000000000000
 
 or Launch ganache-cli -f https://bsc-dataseed.binance.org/ -m $MNEMO -a 20
