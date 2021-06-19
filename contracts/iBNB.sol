@@ -284,10 +284,14 @@ contract iBNB is Ownable {
         _allowances[address(this)][address(router)] = ~uint256(0);
         emit Approval(address(this), address(router), ~uint256(0));
       }
-
-      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(token_amount.div(2), 0, route, address(this), block.timestamp) {
+      
+      //odd numbers management
+      uint256 half = token_amount.div(2);
+      uint256 half_2 = token_amount.sub(half);
+      
+      try router.swapExactTokensForETHSupportingFeeOnTransferTokens(half, 0, route, address(this), block.timestamp) {
         uint256 BNBfromSwap = address(this).balance.sub(BNBfromReward);
-        router.addLiquidityETH{value: BNBfromSwap}(address(this), token_amount.div(2), 0, 0, LP_recipient, block.timestamp); //will not be catched
+        router.addLiquidityETH{value: BNBfromSwap}(address(this), half_2, 0, 0, LP_recipient, block.timestamp); //will not be catched
         emit AddLiq("addLiq: ok");
         return token_amount;
       }
@@ -347,14 +351,6 @@ contract iBNB is Ownable {
       _last_tx[msg.sender].last_claim = block.timestamp;
       emit Transfer(msg.sender, address(this), tax);
       safeTransferETH(msg.sender, claimable);
-    }
-
-    function getQuoteInBNB(uint256 nb_token) internal view returns (uint256) {
-      (uint112 _reserve0, uint112 _reserve1,) = pair.getReserves(); // returns reserve0, reserve1, timestamp last tx
-      if(address(this) != pair.token0()) { // 0 <- iBNB
-        (_reserve0, _reserve1) = (_reserve1, _reserve0);
-      }
-      return router.getAmountOut(nb_token, _reserve0, _reserve1);
     }
 
     function swapForBNB(uint256 token_amount, address receiver) internal returns (uint256) {
