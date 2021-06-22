@@ -58,6 +58,8 @@ contract iBNB is Ownable {
     uint16[5] public selling_taxes_tranches = [125, 250, 500, 750, 1000]; // % and div by 10**4 0.0125% -0.025% -(...)
 
     bool public circuit_breaker;
+    bool private liq_swap_reentrancy_guard;
+    bool private reward_swap_reentrancy_guard;
 
     string private _name = "iBNB";
     string private _symbol = "iBNB";
@@ -257,14 +259,18 @@ contract iBNB is Ownable {
 
         prop_balances memory _balancer_balances = balancer_balances;
 
-        if(_balancer_balances.liquidity_pool >= swap_for_liquidity_threshold) {
+        if(_balancer_balances.liquidity_pool >= swap_for_liquidity_threshold && !liq_swap_reentrancy_guard) {
+            liq_swap_reentrancy_guard = true;
             uint256 token_out = addLiquidity(_balancer_balances.liquidity_pool);
             balancer_balances.liquidity_pool -= token_out; //not balanceOf, in case addLiq revert
+            liq_swap_reentrancy_guard = false;
         }
 
-        if(_balancer_balances.reward_pool >= swap_for_reward_threshold) {
+        if(_balancer_balances.reward_pool >= swap_for_reward_threshold && !reward_swap_reentrancy_guard) {
+            reward_swap_reentrancy_guard = true;
             uint256 token_out = swapForBNB(_balancer_balances.reward_pool, address(this));
             balancer_balances.reward_pool -= token_out;
+            reward_swap_reentrancy_guard = false;
         }
 
         emit BalancerPools(_balancer_balances.liquidity_pool, _balancer_balances.reward_pool);
