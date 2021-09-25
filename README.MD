@@ -1,3 +1,5 @@
+##deprecated -> see "iBNB" repo for updates + nodejs controllers
+
 ## iBNB
 
 
