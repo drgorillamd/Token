@@ -1,6 +1,6 @@
-##deprecated -> see "iBNB" repo for updates + nodejs controllers
+# deprecated -> see "iBNB" repo for updates + nodejs controllers
 
-## iBNB
+### iBNB
 
 
 Every tx is subject to:
